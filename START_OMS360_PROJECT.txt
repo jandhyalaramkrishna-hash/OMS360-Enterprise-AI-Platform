@@ -3,6 +3,10 @@ OMS360 Enterprise AI Platform v1.0.0
 Developed by ZelQA Technologies
 
 Daily Startup Checklist
+docker exec -it oms360_mysql mysql -uroot -proot123 oms360_db
+
+USE oms360_db;
+SHOW TABLES;
 
 =========================================================
 
