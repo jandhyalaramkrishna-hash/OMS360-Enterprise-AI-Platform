@@ -1,0 +1,9 @@
+OMS-360 Enterprise Order Management System
+Release: OMS360_v1.2_Production_Release
+Application version: 1.1 (app/config.py APP_VERSION)
+Packaging round: V1.2 (final consistency review pass)
+Packaged: 2026-07-18
+Source: OMS360_Enterprise_Full_Source_v1_2_20260717.zip (unmodified app/infra/tests/SQL)
+Added this round: launcher scripts, docker-compose.app.yml, logging, docs, FINAL_RELEASE_REPORT.md
+Consistency fix this pass: docker-compose.app.yml env vars trimmed to exact
+parity with docker-compose.yml (see FINAL_RELEASE_REPORT.md section 7)

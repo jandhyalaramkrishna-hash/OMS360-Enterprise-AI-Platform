@@ -1,0 +1,35 @@
+"""
+AI Service Layer - Providers - Azure OpenAI (prepared, not called)
+OMS-360 Enterprise Food Delivery Platform
+
+Sprint 2 scope: structurally real, correctly reports configuration state
+(requires both an API key and an endpoint, unlike single-key providers);
+complete() deliberately does not call the Azure OpenAI API. No SDK
+dependency has been added to requirements.txt ("no unnecessary
+dependencies"). Wiring a real call is a future, explicitly-scoped sprint.
+"""
+
+import os
+
+from app.core.logging_config import get_logger
+
+from ai.core.exceptions import AIProviderNotConfiguredError
+from ai.providers.base import BaseProvider
+
+logger = get_logger("ai.providers.azure_openai")
+
+
+class AzureOpenAIProvider(BaseProvider):
+    name = "azure_openai"
+    required_env_vars = ("AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT")
+
+    def is_configured(self) -> bool:
+        return bool(os.environ.get("AZURE_OPENAI_API_KEY", "").strip()) and bool(
+            os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
+        )
+
+    async def complete(self, prompt: str, **kwargs) -> dict:
+        logger.warning("AzureOpenAIProvider.complete() called - not implemented in Sprint 2")
+        raise AIProviderNotConfiguredError(
+            "AzureOpenAIProvider is prepared but not yet wired to make API calls (Sprint 2 scope: preparation only)."
+        )

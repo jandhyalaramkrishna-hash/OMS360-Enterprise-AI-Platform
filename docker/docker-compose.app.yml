@@ -1,0 +1,93 @@
+# =============================================================================
+# docker-compose.app.yml  (LEGACY / OPTIONAL - not used by START_OMS360.bat,
+# STOP_OMS360.bat, or RESTART_OMS360.bat as of the 2026-07-21 infrastructure
+# fix. Kept for anyone who still wants to attach a standalone app layer to an
+# already-running OMS360 infra stack by hand.)
+#
+# Why the launcher scripts stopped using this file:
+#   The original design existed because the base docker-compose.yml did not
+#   declare a fixed network name, so Compose auto-named it something like
+#   "project-5-oms360-food-delivery-ai-enterprise-platform_default" - not
+#   knowable in advance. This file solved that by attaching to whatever
+#   network name scripts\common.bat detected at runtime via `docker inspect`
+#   and wrote to .env.oms360-app.
+#
+#   The base docker-compose.yml now declares a FIXED network name
+#   (oms360_network - see its `networks:` block), and it already defines
+#   oms360-engine/oms360-consumer directly with proper depends_on health
+#   conditions. So START_OMS360.bat now just runs a single
+#   `docker compose up -d --build --wait` against the one compose file,
+#   which correctly starts only what isn't already running/healthy - no
+#   second file, no network detection, no .env file needed.
+#
+# Still starts ONLY the OMS-360 application layer:
+#   - oms360-engine   (container: oms360_core_engine, FastAPI, port 8000)
+#   - oms360-consumer (container: oms360_consumer, app/messaging/consumer.py)
+# and attaches to the fixed oms360_network network. The mysql/zookeeper/kafka
+# containers must already be running (started via the project's own
+# docker-compose.yml). This file never creates, renames, or restarts them.
+#
+# Fixed in this pass:
+#   - `dockerfile: Dockerfile` pointed at a file that does not exist at the
+#     assumed location. The Dockerfile actually lives at `docker/Dockerfile`.
+#     Fixed to `dockerfile: docker/Dockerfile`, matching the base
+#     docker-compose.yml. If you invoke this file standalone, run it from the
+#     repo root with an explicit project directory so the `context: .` build
+#     context resolves correctly, e.g.:
+#       docker compose -f docker-compose.yml -f docker/docker-compose.app.yml ^
+#         up -d --build oms360-engine oms360-consumer
+#     (invoking it together with the base file, as shown, is the safest way
+#     to use it - it also removes the need for the external-network dance
+#     below, since Compose then manages the network itself).
+#   - Network name is now the fixed `oms360_network` instead of a
+#     ${NETWORK_NAME} variable that had to be detected and written to an
+#     .env file before every use.
+# =============================================================================
+
+services:
+  oms360-engine:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: oms360_core_engine
+    restart: unless-stopped
+    networks:
+      - oms360_external
+    environment:
+      - OMS360_DB_HOST=mysql
+      - OMS360_DB_USER=root
+      - OMS360_DB_PASSWORD=root123
+      - OMS360_DB_NAME=oms360_db
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  oms360-consumer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: oms360_consumer
+    restart: unless-stopped
+    command: ["python", "-m", "app.messaging.consumer"]
+    networks:
+      - oms360_external
+    environment:
+      - OMS360_DB_HOST=mysql
+      - OMS360_DB_USER=root
+      - OMS360_DB_PASSWORD=root123
+      - OMS360_DB_NAME=oms360_db
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+    depends_on:
+      oms360-engine:
+        condition: service_healthy
+
+networks:
+  oms360_external:
+    external: true
+    name: oms360_network

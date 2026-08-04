@@ -1,0 +1,23 @@
+{
+  "name": "oms360-playwright-qa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright QA automation suite for the OMS-360 Food Delivery Platform (REST API + operational dashboards).",
+  "scripts": {
+    "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:regression": "playwright test --grep @regression",
+    "test:api": "playwright test tests/api",
+    "test:dashboard": "playwright test tests/dashboard",
+    "test:e2e": "playwright test tests/e2e",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "report": "playwright show-report",
+    "install:browsers": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.4"
+  }
+}

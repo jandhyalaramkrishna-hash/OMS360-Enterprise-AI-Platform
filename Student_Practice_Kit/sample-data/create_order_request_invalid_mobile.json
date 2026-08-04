@@ -1,0 +1,16 @@
+{
+  "customer_id": "CUST-002",
+  "customer_name": "Test Student",
+  "mobile": "12345",
+  "payment_method": "UPI",
+  "items": [
+    { "item_id": "ITEM-BURGER", "quantity": 1 }
+  ],
+  "delivery_address": {
+    "door_no": "1",
+    "street": "Test Street",
+    "city": "Bengaluru",
+    "state": "Karnataka",
+    "pincode": "560001"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "customer_id": "CUST-001",
+  "customer_name": "Anil Kumar",
+  "mobile": "9876543210",
+  "payment_method": "UPI",
+  "enterprise_id": "ENT-99",
+  "items": [
+    { "item_id": "ITEM-BURGER", "quantity": 2 }
+  ],
+  "delivery_address": {
+    "door_no": "12/B",
+    "street": "M G Road",
+    "city": "Bengaluru",
+    "state": "Karnataka",
+    "pincode": "560001"
+  }
+}

@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OMS-360 | AI Copilot</title>
+<style>
+  :root{
+    --bg-0:#0a0e14; --bg-1:#0f1420; --bg-2:#141b29; --bg-3:#1a2333;
+    --border:#242e42; --border-soft:#1c2434;
+    --text-hi:#eef2f9; --text-mid:#9fadc4; --text-low:#5f6d85;
+    --brand:#4c8dff; --brand-soft:#1c3252;
+    --green:#22c58b; --green-soft:#123527;
+    --amber:#f5a524; --amber-soft:#3a2a10;
+    --red:#f4415c; --red-soft:#3a1520;
+    --purple:#a78bfa; --purple-soft:#2a2145;
+    --cyan:#38d0e0;
+    --radius:12px; --radius-sm:8px;
+    font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:radial-gradient(1200px 800px at 50% -10%, #101b2e 0%, var(--bg-0) 45%) fixed; color:var(--text-hi); -webkit-font-smoothing:antialiased;}
+  a{color:inherit; text-decoration:none;}
+
+  .topbar{
+    position:sticky; top:0; z-index:50; display:flex; align-items:center; justify-content:space-between;
+    padding:14px 28px; background:rgba(10,14,20,0.85); backdrop-filter:blur(10px); border-bottom:1px solid var(--border-soft);
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand-mark{width:38px;height:38px;border-radius:10px; background:linear-gradient(135deg, var(--purple), var(--brand)); display:flex;align-items:center;justify-content:center; font-weight:800; font-size:15px; color:#0d0a1a; box-shadow:0 4px 18px rgba(167,139,250,.3);}
+  .brand-text .title{font-size:16px; font-weight:700;}
+  .brand-text .subtitle{font-size:11.5px; color:var(--text-mid); margin-top:1px;}
+  .top-actions{display:flex; align-items:center; gap:14px;}
+  .nav-switch{display:flex; background:var(--bg-2); border:1px solid var(--border); border-radius:9px; padding:3px; gap:2px;}
+  .nav-switch a{padding:7px 14px; border-radius:7px; font-size:12.5px; font-weight:600; color:var(--text-mid);}
+  .nav-switch a.active{background:var(--brand); color:#fff;}
+  .live-pill{display:flex; align-items:center; gap:7px; background:var(--green-soft); border:1px solid #1d4a37; color:var(--green); font-size:11.5px; font-weight:700; padding:6px 12px; border-radius:20px;}
+  .live-dot{width:7px;height:7px;border-radius:50%; background:var(--green); animation:pulse 1.8s infinite;}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,139,.55);} 70%{box-shadow:0 0 0 8px rgba(34,197,139,0);} 100%{box-shadow:0 0 0 0 rgba(34,197,139,0);}}
+  .clock{font-size:11.5px; color:var(--text-mid); font-variant-numeric:tabular-nums; min-width:150px; text-align:right;}
+
+  .page{max-width:1500px; margin:0 auto; padding:22px 28px 60px;}
+  .conn-banner{
+    display:none; align-items:center; gap:10px; background:var(--red-soft); border:1px solid #55212c;
+    color:var(--red); padding:10px 16px; border-radius:9px; font-size:12.5px; margin-bottom:18px; font-weight:600;
+  }
+  .conn-banner.show{display:flex;}
+  .disabled-banner{
+    display:none; align-items:center; gap:10px; background:var(--amber-soft); border:1px solid #5a4416;
+    color:var(--amber); padding:10px 16px; border-radius:9px; font-size:12.5px; margin-bottom:18px; font-weight:600;
+  }
+  .disabled-banner.show{display:flex;}
+
+  .layout{display:grid; grid-template-columns:2.1fr 1fr; gap:22px; align-items:start;}
+  @media(max-width:1080px){ .layout{grid-template-columns:1fr;} }
+
+  /* Vertical stack of the main Copilot sections:
+     Business Question -> SQL Knowledge Explorer (optional/collapsible). */
+  .main-col{display:flex; flex-direction:column; gap:22px;}
+
+  .panel{background:linear-gradient(180deg, var(--bg-2), var(--bg-1)); border:1px solid var(--border); border-radius:var(--radius); overflow:visible;}
+  .panel-head{display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border-soft); gap:10px; flex-wrap:wrap;}
+  .panel-head h2{font-size:14.5px; margin:0; display:flex; align-items:center; gap:9px;}
+  .panel-head .ph-right{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .icon-chip{width:26px;height:26px;border-radius:7px; display:flex;align-items:center;justify-content:center; font-size:13px; flex-shrink:0;}
+  .badge{background:var(--bg-3); border:1px solid var(--border); color:var(--text-mid); font-size:11px; padding:3px 9px; border-radius:20px; font-weight:600;}
+  .badge.engine-real{background:var(--purple-soft); color:var(--purple); border-color:#3d3166;}
+  .badge.engine-mock{background:var(--bg-3); color:var(--text-mid);}
+
+  /* ---------- Searchable dropdown (shared by both selectors) ---------- */
+  .combo{position:relative;}
+  .combo-input{
+    width:100%; background:var(--bg-1); border:1px solid var(--border); color:var(--text-hi);
+    padding:11px 14px; border-radius:9px; font-size:13px; cursor:pointer;
+  }
+  .combo-input::placeholder{color:var(--text-low);}
+  .combo-input:focus{outline:none; border-color:var(--brand);}
+  /* Once a question/query is selected, the combo itself shows which one in
+     blue - that's the single source of truth for "what's selected", so the
+     result panel below never needs to repeat the question text again. */
+  .combo-input.has-selection{color:var(--brand); font-weight:700;}
+  .combo-panel{
+    position:absolute; top:calc(100% + 6px); left:0; right:0; background:var(--bg-2); border:1px solid var(--border);
+    border-radius:9px; max-height:300px; overflow-y:auto; z-index:60; display:none; box-shadow:0 16px 34px rgba(0,0,0,.45);
+  }
+  .combo-panel.open{display:block;}
+  .combo-option{padding:9px 14px; font-size:12.5px; color:var(--text-mid); cursor:pointer;}
+  .combo-option:hover{background:var(--bg-3); color:var(--text-hi);}
+  .combo-option.selected{color:var(--brand); font-weight:700;}
+  .combo-empty{padding:10px 14px; font-size:12px; color:var(--text-low); font-style:italic;}
+
+  /* ---------- 1. Business Question ---------- */
+  .bq-body{padding:18px; display:flex; flex-direction:column; gap:14px;}
+  .bq-result{background:var(--bg-1); border:1px solid var(--border-soft); border-radius:9px; padding:16px; display:none;}
+  .bq-result.show{display:block;}
+  .bq-label{font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-low); font-weight:700; margin-bottom:5px;}
+  .bq-answer-text{font-size:13.5px; color:var(--text-hi); line-height:1.65;}
+  .bq-meta{font-size:10.3px; color:var(--text-low); margin-top:11px;}
+
+  /* ---------- 2. SQL Knowledge Explorer ---------- */
+  .explorer-toggle-row{padding:14px 18px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;}
+  .explorer-toggle-row p{margin:0; font-size:12px; color:var(--text-mid); line-height:1.5;}
+  .explorer-toggle-btn{
+    background:var(--purple-soft); border:1px solid #3d3166; color:var(--purple); padding:9px 18px; border-radius:8px;
+    font-size:12.5px; font-weight:700; cursor:pointer; flex-shrink:0;
+  }
+  .explorer-toggle-btn:hover{background:#31285e;}
+  .explorer-body{display:none;}
+  .explorer-body.open{display:block;}
+  .explorer-picker{padding:0 18px 18px;}
+  .explorer-context{padding:12px 18px; font-size:12px; color:var(--text-mid); border-top:1px solid var(--border-soft); border-bottom:1px solid var(--border-soft); background:var(--bg-1);}
+
+  .qd-section{border-bottom:1px solid var(--border-soft);}
+  .qd-section:last-child{border-bottom:none;}
+  .qd-header{
+    width:100%; display:flex; align-items:center; justify-content:space-between; background:none; border:none;
+    color:var(--text-hi); padding:13px 18px; font-size:12.8px; font-weight:700; cursor:pointer; text-align:left;
+  }
+  .qd-header:hover{background:var(--bg-3);}
+  .qd-header.open{color:var(--brand);}
+  .qd-chevron{color:var(--text-low); transition:transform .15s ease; font-size:11px;}
+  .qd-header.open .qd-chevron{transform:rotate(180deg); color:var(--brand);}
+  .qd-body{display:none; padding:0 18px 16px; font-size:12px; color:var(--text-mid); white-space:pre-wrap; word-break:break-word; line-height:1.65;}
+  .qd-body.open{display:block;}
+  .qd-body code{
+    font-family:'SF Mono',Consolas,monospace; color:var(--cyan); background:var(--bg-1);
+    padding:10px 12px; border-radius:8px; display:block; border:1px solid var(--border-soft); white-space:pre-wrap; word-break:break-word;
+  }
+
+  /* ---------- Side panels ---------- */
+  .side-stack{display:flex; flex-direction:column; gap:16px;}
+  .side-body{padding:16px 18px; font-size:12.8px; color:var(--text-mid); line-height:1.6;}
+  .refresh-btn{background:var(--bg-2); border:1px solid var(--border); color:var(--text-mid); padding:5px 10px; border-radius:7px; font-size:11px; font-weight:600; cursor:pointer;}
+  .refresh-btn:hover{background:var(--bg-3); color:var(--text-hi);}
+  .kpi-mini-grid{display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:12px;}
+  .kpi-mini{background:var(--bg-1); border:1px solid var(--border-soft); border-radius:8px; padding:9px 11px;}
+  .kpi-mini .v{font-size:15px; font-weight:800; font-variant-numeric:tabular-nums;}
+  .kpi-mini .l{font-size:9.6px; color:var(--text-low); text-transform:uppercase; letter-spacing:.3px; margin-top:2px;}
+  .insight-row{display:flex; gap:9px; align-items:flex-start; padding:10px 0; border-bottom:1px solid var(--border-soft);}
+  .insight-row:last-child{border-bottom:none;}
+  .insight-dot{width:8px;height:8px;border-radius:50%; margin-top:4px; flex-shrink:0;}
+  .insight-dot.info{background:var(--brand);}
+  .insight-dot.warning{background:var(--amber);}
+  .insight-dot.critical{background:var(--red);}
+  .insight-text{font-size:12.3px; color:var(--text-hi); line-height:1.5;}
+  .empty-note{color:var(--text-low); font-size:12px; text-align:center; padding:20px 0;}
+  .last-updated{font-size:10.3px; color:var(--text-low); padding:0 18px 14px; text-align:right;}
+  ::-webkit-scrollbar{width:8px; height:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--border); border-radius:8px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">&#129302;</div>
+      <div class="brand-text">
+        <div class="title">OMS-360 AI Copilot</div>
+        <div class="subtitle">Ask business questions &mdash; answers always come from real, live data</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div class="nav-switch">
+        <a href="/dashboard/operations">Operations</a>
+        <a href="/dashboard/monitoring">Monitoring</a>
+        <a href="/dashboard/inventory">Inventory</a>
+        <a class="active" href="/dashboard/ai-copilot">AI Copilot</a>
+      </div>
+      <div class="badge" id="engineBadge">Engine: &ndash;</div>
+      <div class="live-pill"><span class="live-dot"></span> LIVE</div>
+      <div class="clock" id="clock">--</div>
+    </div>
+  </div>
+
+  <div class="page">
+
+    <div class="conn-banner" id="connBanner">
+      &#9888; Could not reach the OMS-360 API. Retrying automatically&hellip;
+    </div>
+    <div class="disabled-banner" id="disabledBanner">
+      &#9888; AI Copilot is currently disabled (COPILOT_ENABLED=false in the environment).
+    </div>
+
+    <div class="layout">
+
+      <!-- Main column: Business Question -> SQL Knowledge Explorer (optional) -->
+      <div class="main-col">
+
+        <!-- 1. Business Question -->
+        <div class="panel" id="businessQuestionPanel">
+          <div class="panel-head">
+            <h2><span class="icon-chip" style="background:var(--brand-soft);">&#128172;</span> Business Question</h2>
+            <div class="ph-right">
+              <span class="badge">Instant answer &mdash; no typing required</span>
+            </div>
+          </div>
+          <div class="bq-body">
+            <div class="combo" id="bqComboRoot"></div>
+            <div class="bq-result" id="bqResult">
+              <div class="bq-label">Answer</div>
+              <div class="bq-answer-text" id="bqAnswerText">&ndash;</div>
+              <div class="bq-meta" id="bqMeta"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. SQL Knowledge Explorer (optional, collapsed by default - the -->
+        <!-- app stays a clean business assistant unless you open this.) -->
+        <div class="panel" id="sqlExplorerPanel">
+          <div class="explorer-toggle-row">
+            <p>Browse the SQL, explanation, related tables, and business flow behind every supported query &mdash; no AI request needed.</p>
+            <button class="explorer-toggle-btn" id="explorerToggleBtn">Open SQL Explorer</button>
+          </div>
+          <div class="explorer-body" id="explorerBody">
+            <div class="explorer-picker">
+              <div class="combo" id="sqlComboRoot"></div>
+            </div>
+            <div class="explorer-context" id="explorerContextText">&ndash;</div>
+
+            <div class="qd-section">
+              <button class="qd-header open" data-kind="sql"><span>SQL Query</span><span class="qd-chevron">&#9662;</span></button>
+              <div class="qd-body open" id="expBody-sql"><span class="empty-note">Select a query above.</span></div>
+            </div>
+            <div class="qd-section">
+              <button class="qd-header" data-kind="explain"><span>Explain SQL</span><span class="qd-chevron">&#9662;</span></button>
+              <div class="qd-body" id="expBody-explain"><span class="empty-note">Select a query above.</span></div>
+            </div>
+            <div class="qd-section">
+              <button class="qd-header" data-kind="related"><span>Related Tables</span><span class="qd-chevron">&#9662;</span></button>
+              <div class="qd-body" id="expBody-related"><span class="empty-note">Select a query above.</span></div>
+            </div>
+            <div class="qd-section">
+              <button class="qd-header" data-kind="flow"><span>Business Flow</span><span class="qd-chevron">&#9662;</span></button>
+              <div class="qd-body" id="expBody-flow"><span class="empty-note">Select a query above.</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Side stack -->
+      <div class="side-stack">
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2><span class="icon-chip" style="background:var(--green-soft);">&#128202;</span> Executive Summary</h2>
+            <button class="refresh-btn" id="refreshSummaryBtn">Refresh</button>
+          </div>
+          <div class="side-body" id="summaryBody">
+            <div class="empty-note">Loading&hellip;</div>
+          </div>
+          <div class="last-updated" id="summaryUpdated"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2><span class="icon-chip" style="background:var(--amber-soft);">&#128161;</span> Business Insights</h2>
+            <button class="refresh-btn" id="refreshInsightsBtn">Refresh</button>
+          </div>
+          <div class="side-body" id="insightsBody" style="padding-top:4px;">
+            <div class="empty-note">Loading&hellip;</div>
+          </div>
+          <div class="last-updated" id="insightsUpdated"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+<script>
+  const API_BASE = "/api/v1/ai/copilot";
+  const connBanner = document.getElementById("connBanner");
+  const disabledBanner = document.getElementById("disabledBanner");
+
+  function setClock(){
+    document.getElementById("clock").textContent = new Date().toLocaleString();
+  }
+  setClock(); setInterval(setClock, 1000);
+
+  function showConnBanner(show){ connBanner.classList.toggle("show", show); }
+  function showDisabledBanner(show){ disabledBanner.classList.toggle("show", show); }
+
+  async function apiFetch(path, options){
+    const res = await fetch(API_BASE + path, Object.assign({ cache: "no-store" }, options || {}));
+    if(res.status === 403){
+      showDisabledBanner(true);
+      throw new Error("copilot_disabled");
+    }
+    showDisabledBanner(false);
+    if(!res.ok){
+      let detail = "Request failed (" + res.status + ")";
+      try{ const body = await res.json(); if(body && body.detail) detail = body.detail; }catch(e){}
+      throw new Error(detail);
+    }
+    showConnBanner(false);
+    return res.json();
+  }
+
+  // ---- Reusable searchable dropdown ----
+  // A plain text input that filters a list of options as you type; used
+  // for both the Business Question selector and the SQL Explorer's
+  // SQL Query selector (same catalog, two independent selections).
+  function createSearchableSelect(root, opts){
+    root.classList.add("combo");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "combo-input";
+    input.placeholder = opts.placeholder || "Search…";
+    input.autocomplete = "off";
+    const panel = document.createElement("div");
+    panel.className = "combo-panel";
+    root.appendChild(input);
+    root.appendChild(panel);
+
+    let items = [];
+    let selectedKey = null;
+
+    function renderPanel(filterText){
+      panel.innerHTML = "";
+      const f = (filterText || "").toLowerCase();
+      const filtered = items.filter(function(it){ return it.label.toLowerCase().indexOf(f) !== -1; });
+      if(!filtered.length){
+        const empty = document.createElement("div");
+        empty.className = "combo-empty";
+        empty.textContent = "No matching queries";
+        panel.appendChild(empty);
+        return;
+      }
+      filtered.forEach(function(it){
+        const opt = document.createElement("div");
+        opt.className = "combo-option" + (it.key === selectedKey ? " selected" : "");
+        opt.textContent = it.label;
+        opt.onclick = function(){ selectItem(it.key, true); };
+        panel.appendChild(opt);
+      });
+    }
+
+    function selectItem(key, fromUser){
+      const it = items.find(function(x){ return x.key === key; });
+      if(!it) return;
+      selectedKey = key;
+      input.value = it.label;
+      input.title = it.label;
+      input.classList.add("has-selection");
+      panel.classList.remove("open");
+      if(fromUser && opts.onChange) opts.onChange(key, it.label);
+    }
+
+    input.addEventListener("focus", function(){ renderPanel(""); panel.classList.add("open"); input.select(); });
+    input.addEventListener("input", function(){ renderPanel(input.value); panel.classList.add("open"); });
+    document.addEventListener("click", function(e){ if(!root.contains(e.target)) panel.classList.remove("open"); });
+
+    return {
+      setItems: function(newItems){ items = newItems; },
+      select: function(key, fromUser){ selectItem(key, fromUser); },
+      getSelected: function(){ return selectedKey; },
+    };
+  }
+
+  // ---- Catalog + Business Question ----
+  let CATALOG = [];
+  let sqlSelectedKey = null;
+
+  const bqCombo = createSearchableSelect(document.getElementById("bqComboRoot"), {
+    placeholder: "Search or select a business question…",
+    onChange: function(key){ selectBusinessQuestion(key); },
+  });
+  const sqlCombo = createSearchableSelect(document.getElementById("sqlComboRoot"), {
+    placeholder: "Search or select a query…",
+    onChange: function(key){ selectSqlQuery(key); },
+  });
+
+  async function loadCatalog(){
+    try{
+      const data = await apiFetch("/catalog");
+      CATALOG = data.intents || [];
+      const items = CATALOG.map(function(i){ return { key: i.key, label: i.question_example }; });
+      bqCombo.setItems(items);
+      sqlCombo.setItems(items);
+      if(CATALOG.length){
+        bqCombo.select(CATALOG[0].key, true);
+      }
+    }catch(e){ /* connection banners already handled by apiFetch */ }
+  }
+
+  async function selectBusinessQuestion(key){
+    const resultEl = document.getElementById("bqResult");
+    const aEl = document.getElementById("bqAnswerText");
+    const metaEl = document.getElementById("bqMeta");
+
+    // The selected question is shown once, in blue, in the dropdown itself
+    // (via .has-selection) - no need to repeat it again down here; this
+    // panel only needs to show the Answer.
+    resultEl.classList.add("show");
+    aEl.textContent = "Loading…";
+    metaEl.textContent = "";
+
+    try{
+      const data = await apiFetch("/intents/" + key + "/answer");
+      aEl.textContent = data.answer_text;
+      metaEl.textContent = data.reworded_by_ai
+        ? ("Rephrased by " + data.active_provider)
+        : "Deterministic answer — real OMS-360 data";
+    }catch(e){
+      aEl.textContent = "Could not load: " + e.message;
+    }
+
+    // Keep the SQL Explorer's own selector in sync with the latest Business
+    // Question, so if/when the user opens the Explorer, it's already showing
+    // the matching query - without forcing the Explorer open automatically
+    // (it stays optional, per the "clean business assistant by default" rule).
+    sqlCombo.select(key, false);
+    sqlSelectedKey = key;
+    if(explorerOpen) loadSqlSections(key);
+  }
+
+  // ---- SQL Knowledge Explorer ----
+  let explorerOpen = false;
+  const explorerBody = document.getElementById("explorerBody");
+  const explorerToggleBtn = document.getElementById("explorerToggleBtn");
+
+  explorerToggleBtn.onclick = function(){
+    explorerOpen = !explorerOpen;
+    explorerBody.classList.toggle("open", explorerOpen);
+    explorerToggleBtn.textContent = explorerOpen ? "Hide SQL Explorer" : "Open SQL Explorer";
+    if(explorerOpen && sqlSelectedKey) loadSqlSections(sqlSelectedKey);
+  };
+
+  function selectSqlQuery(key){
+    sqlSelectedKey = key;
+    loadSqlSections(key);
+  }
+
+  const SQL_KIND_MAP = {
+    sql:     { path: function(k){ return "/intents/" + k + "/sql"; },            field: "sql_text" },
+    explain: { path: function(k){ return "/intents/" + k + "/explain"; },        field: "explanation" },
+    related: { path: function(k){ return "/intents/" + k + "/related-tables"; }, field: "related_tables" },
+    flow:    { path: function(k){ return "/intents/" + k + "/business-flow"; },  field: "business_flow" },
+  };
+
+  async function loadSqlSections(key){
+    const label = (CATALOG.find(function(i){ return i.key === key; }) || {}).question_example || key;
+    document.getElementById("explorerContextText").textContent = "Showing: “" + label + "”";
+
+    Object.keys(SQL_KIND_MAP).forEach(function(kind){
+      document.getElementById("expBody-" + kind).textContent = "Loading…";
+    });
+
+    await Promise.all(Object.keys(SQL_KIND_MAP).map(async function(kind){
+      const bodyEl = document.getElementById("expBody-" + kind);
+      try{
+        const cfg = SQL_KIND_MAP[kind];
+        const data = await apiFetch(cfg.path(key));
+        let value = data[cfg.field];
+        if(Array.isArray(value)) value = value.join(", ");
+        if(kind === "sql"){
+          bodyEl.innerHTML = "<code></code>";
+          bodyEl.querySelector("code").textContent = value;
+        } else {
+          bodyEl.textContent = value;
+        }
+      }catch(e){
+        bodyEl.textContent = "Could not load: " + e.message;
+      }
+    }));
+  }
+
+  document.querySelectorAll("#sqlExplorerPanel .qd-header").forEach(function(h){
+    h.onclick = function(){
+      const kind = h.dataset.kind;
+      const willOpen = !h.classList.contains("open");
+      h.classList.toggle("open", willOpen);
+      document.getElementById("expBody-" + kind).classList.toggle("open", willOpen);
+    };
+  });
+
+  // ---- Provider status / Executive Summary / Business Insights (unchanged) ----
+
+  async function loadProviderStatus(){
+    try{
+      const data = await apiFetch("/provider-status");
+      const badge = document.getElementById("engineBadge");
+      if(data.active_provider){
+        badge.textContent = "Engine: " + data.active_provider + " (" + data.source + ")";
+        badge.classList.add("engine-real");
+      } else {
+        badge.textContent = "Engine: Deterministic (no LLM configured)";
+        badge.classList.remove("engine-real");
+      }
+    }catch(e){ /* ignore for badge */ }
+  }
+
+  function fmtTime(){ return "Updated " + new Date().toLocaleTimeString(); }
+
+  async function loadSummary(){
+    try{
+      const data = await apiFetch("/executive-summary");
+      const body = document.getElementById("summaryBody");
+      const kpis = (data.kpis && data.kpis.kpis) || {};
+      body.innerHTML = "";
+      const p = document.createElement("div");
+      p.textContent = data.summary_text;
+      body.appendChild(p);
+      const grid = document.createElement("div");
+      grid.className = "kpi-mini-grid";
+      const cells = [
+        ["Total Orders", kpis.total_orders],
+        ["Total Revenue", kpis.total_revenue != null ? ("₹" + Number(kpis.total_revenue).toFixed(2)) : "-"],
+        ["Pending", kpis.pending_orders],
+        ["Delivered", kpis.delivered_orders],
+      ];
+      cells.forEach(function(c){
+        const cell = document.createElement("div");
+        cell.className = "kpi-mini";
+        cell.innerHTML = '<div class="v">' + (c[1] != null ? c[1] : "-") + '</div><div class="l">' + c[0] + '</div>';
+        grid.appendChild(cell);
+      });
+      body.appendChild(grid);
+      document.getElementById("summaryUpdated").textContent = fmtTime();
+    }catch(e){
+      if(e.message !== "copilot_disabled"){
+        document.getElementById("summaryBody").innerHTML = '<div class="empty-note">Could not load summary.</div>';
+      }
+    }
+  }
+
+  async function loadInsights(){
+    try{
+      const data = await apiFetch("/business-insights");
+      const body = document.getElementById("insightsBody");
+      body.innerHTML = "";
+      const insights = data.insights || [];
+      if(!insights.length){
+        body.innerHTML = '<div class="empty-note">No insights yet.</div>';
+      } else {
+        insights.forEach(function(ins){
+          const row = document.createElement("div");
+          row.className = "insight-row";
+          row.innerHTML = '<span class="insight-dot ' + ins.severity + '"></span><span class="insight-text">' + ins.message + '</span>';
+          body.appendChild(row);
+        });
+      }
+      document.getElementById("insightsUpdated").textContent = fmtTime();
+    }catch(e){
+      if(e.message !== "copilot_disabled"){
+        document.getElementById("insightsBody").innerHTML = '<div class="empty-note">Could not load insights.</div>';
+      }
+    }
+  }
+
+  document.getElementById("refreshSummaryBtn").onclick = loadSummary;
+  document.getElementById("refreshInsightsBtn").onclick = loadInsights;
+
+  loadCatalog();
+  loadProviderStatus();
+  loadSummary();
+  loadInsights();
+
+  // Side panels auto-refresh every 6s, matching the other dashboards.
+  setInterval(loadSummary, 6000);
+  setInterval(loadInsights, 6000);
+  setInterval(loadProviderStatus, 6000);
+</script>
+
+</body>
+</html>

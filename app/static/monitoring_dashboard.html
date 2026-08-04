@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OMS-360 | Enterprise Monitoring Center</title>
+<style>
+  :root{
+    --bg-0:#0a0e14; --bg-1:#0f1420; --bg-2:#141b29; --bg-3:#1a2333;
+    --border:#242e42; --border-soft:#1c2434;
+    --text-hi:#eef2f9; --text-mid:#9fadc4; --text-low:#5f6d85;
+    --brand:#4c8dff; --brand-soft:#1c3252;
+    --green:#22c58b; --green-soft:#123527;
+    --amber:#f5a524; --amber-soft:#3a2a10;
+    --red:#f4415c; --red-soft:#3a1520;
+    --crit:#ff2d55; --crit-soft:#4a0f1c;
+    --info:#4c8dff; --info-soft:#122a4a;
+    --purple:#a78bfa; --cyan:#38d0e0;
+    --radius:12px;
+    font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:radial-gradient(1200px 800px at 90% -10%, #101b2e 0%, var(--bg-0) 45%) fixed; color:var(--text-hi); -webkit-font-smoothing:antialiased;}
+  a{color:inherit; text-decoration:none;}
+
+  .topbar{
+    position:sticky; top:0; z-index:50; display:flex; align-items:center; justify-content:space-between;
+    padding:12px 28px; background:rgba(10,14,20,0.9); backdrop-filter:blur(10px); border-bottom:1px solid var(--border-soft);
+    flex-wrap:wrap; gap:10px;
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand-mark{width:38px;height:38px;border-radius:10px; background:linear-gradient(135deg, var(--cyan), var(--brand)); display:flex;align-items:center;justify-content:center; font-weight:800; font-size:15px; color:#04121a; box-shadow:0 4px 18px rgba(56,208,224,.3);}
+  .brand-text .title{font-size:16px; font-weight:700;}
+  .brand-text .subtitle{font-size:11.5px; color:var(--text-mid); margin-top:1px;}
+  .top-actions{display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+  .nav-switch{display:flex; background:var(--bg-2); border:1px solid var(--border); border-radius:9px; padding:3px; gap:2px;}
+  .nav-switch a{padding:7px 14px; border-radius:7px; font-size:12.5px; font-weight:600; color:var(--text-mid);}
+  .nav-switch a.active{background:var(--brand); color:#fff;}
+  .clock{font-size:11.5px; color:var(--text-mid); font-variant-numeric:tabular-nums; min-width:150px; text-align:right;}
+
+  /* Live status strip - replaces the old single LIVE pill (Requirement 4) */
+  .live-strip{display:flex; align-items:center; gap:0; background:var(--bg-2); border:1px solid var(--border); border-radius:9px; padding:0; overflow:hidden;}
+  .live-strip .ls-item{display:flex; flex-direction:column; gap:1px; padding:6px 12px; border-right:1px solid var(--border-soft); min-width:74px;}
+  .live-strip .ls-item:last-child{border-right:none;}
+  .ls-label{font-size:9px; color:var(--text-low); text-transform:uppercase; letter-spacing:.4px;}
+  .ls-value{font-size:11.5px; font-weight:700; display:flex; align-items:center; gap:5px;}
+  .ls-dot{width:6px;height:6px;border-radius:50%; flex-shrink:0;}
+  .ls-UP,.ls-HEALTHY{color:var(--green);} .ls-UP .ls-dot,.ls-HEALTHY .ls-dot{background:var(--green); box-shadow:0 0 6px var(--green);}
+  .ls-WARNING,.ls-IDLE{color:var(--amber);} .ls-WARNING .ls-dot,.ls-IDLE .ls-dot{background:var(--amber);}
+  .ls-DOWN,.ls-DEGRADED{color:var(--red);} .ls-DOWN .ls-dot,.ls-DEGRADED .ls-dot{background:var(--red); box-shadow:0 0 6px var(--red);}
+  .ls-DISABLED,.ls-UNKNOWN{color:var(--text-low);} .ls-DISABLED .ls-dot,.ls-UNKNOWN .ls-dot{background:var(--text-low);}
+
+  .page{max-width:1680px; margin:0 auto; padding:18px 28px 60px;}
+  .section-title{display:flex; align-items:center; justify-content:space-between; margin:30px 0 14px;}
+  .section-title h2{font-size:15.5px; margin:0; display:flex; align-items:center; gap:9px;}
+  .section-title .badge{background:var(--bg-3); border:1px solid var(--border); color:var(--text-mid); font-size:11px; padding:3px 9px; border-radius:20px; font-weight:600;}
+  .section-title .priority-badge{background:var(--crit-soft); border:1px solid #6b1a2e; color:var(--crit); font-size:10px; padding:3px 10px; border-radius:20px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;}
+  .icon-chip{width:26px;height:26px;border-radius:7px; display:flex;align-items:center;justify-content:center; font-size:13px;}
+
+  .panel{background:linear-gradient(180deg, var(--bg-2), var(--bg-1)); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;}
+  .panel-pad{padding:18px 20px;}
+
+  /* Dependency-down banner (Requirement 5) */
+  .down-banner{display:none; flex-direction:column; gap:6px; background:var(--red-soft); border:1px solid #6b1a2e; color:#ffd7de; padding:14px 18px; border-radius:10px; margin-bottom:16px;}
+  .down-banner.show{display:flex;}
+  .down-banner .db-title{font-weight:800; font-size:13.5px; color:var(--red); display:flex; align-items:center; gap:8px;}
+  .down-banner .db-list{font-size:12px; line-height:1.6;}
+  .conn-banner{display:none; align-items:center; gap:10px; background:var(--red-soft); border:1px solid #55212c; color:var(--red); padding:10px 16px; border-radius:9px; font-size:12.5px; margin-bottom:16px; font-weight:600;}
+  .conn-banner.show{display:flex;}
+
+  /* Overall status hero (Requirement 8: moved below Critical Alerts) */
+  .hero{display:flex; align-items:center; gap:20px; padding:18px 24px; flex-wrap:wrap;}
+  .hero-status{display:flex; align-items:center; gap:12px; padding:9px 18px; border-radius:12px; font-weight:800; font-size:18px;}
+  .hero-status .hdot{width:11px;height:11px;border-radius:50%;}
+  .hero-HEALTHY{background:var(--green-soft); color:var(--green);}
+  .hero-HEALTHY .hdot{background:var(--green); box-shadow:0 0 12px var(--green);}
+  .hero-WARNING{background:var(--amber-soft); color:var(--amber);}
+  .hero-WARNING .hdot{background:var(--amber); box-shadow:0 0 12px var(--amber);}
+  .hero-DEGRADED,.hero-DOWN{background:var(--red-soft); color:var(--red);}
+  .hero-DEGRADED .hdot,.hero-DOWN .hdot{background:var(--red); box-shadow:0 0 12px var(--red);}
+  .hero-meta{display:flex; gap:22px; flex-wrap:wrap;}
+  .hero-meta .hm{font-size:11.5px; color:var(--text-mid);}
+  .hero-meta .hm b{color:var(--text-hi); display:block; font-size:13.5px; margin-top:2px;}
+
+  .tile-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:14px;}
+  .tile-grid.cols-7{grid-template-columns:repeat(7,1fr);}
+  @media(max-width:1400px){.tile-grid.cols-7{grid-template-columns:repeat(4,1fr);}}
+  @media(max-width:1200px){.tile-grid{grid-template-columns:repeat(2,1fr);}}
+  .tile{background:var(--bg-2); border:1px solid var(--border); border-radius:11px; padding:14px 16px; position:relative;}
+  .tile.tile-down{border-color:#6b1a2e; box-shadow:0 0 0 1px #6b1a2e inset;}
+  .tile-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:9px;}
+  .tile-name{font-size:11.5px; font-weight:700; color:var(--text-mid); display:flex; align-items:center; gap:7px;}
+  .tile-status{font-size:10px; font-weight:800; padding:3px 8px; border-radius:20px; letter-spacing:.3px;}
+  .ts-UP,.ts-HEALTHY,.ts-OK,.ts-CONTAINERIZED{background:var(--green-soft); color:var(--green);}
+  .ts-WARNING,.ts-NOT_CONTAINERIZED,.ts-IDLE{background:var(--amber-soft); color:var(--amber);}
+  .ts-DOWN,.ts-DEGRADED{background:var(--red-soft); color:var(--red);}
+  .ts-DISABLED,.ts-NOT_CONFIGURED,.ts-NOT_INITIALIZED,.ts-UNKNOWN{background:var(--bg-3); color:var(--text-low);}
+  .tile-value{font-size:20px; font-weight:800; font-variant-numeric:tabular-nums;}
+  .tile-sub{font-size:10.5px; color:var(--text-low); margin-top:4px;}
+
+  .kpi-strip{display:grid; grid-template-columns:repeat(6,1fr); gap:12px;}
+  @media(max-width:1100px){.kpi-strip{grid-template-columns:repeat(3,1fr);}}
+  .kpi-cell{background:var(--bg-2); border:1px solid var(--border); border-radius:10px; padding:14px 16px;}
+  .kpi-cell .kv{font-size:22px; font-weight:800; font-variant-numeric:tabular-nums;}
+  .kpi-cell .kl{font-size:10.5px; color:var(--text-mid); text-transform:uppercase; letter-spacing:.4px; margin-top:4px;}
+  .c-red .kv{color:var(--red);} .c-amber .kv{color:var(--amber);} .c-green .kv{color:var(--green);}
+  .c-cyan .kv{color:var(--cyan);} .c-blue .kv{color:var(--brand);} .c-purple .kv{color:var(--purple);}
+
+  .table-wrap{overflow-x:auto;}
+  table{width:100%; border-collapse:collapse; font-size:12.2px; min-width:520px;}
+  .table-compact table{min-width:0;}
+  .table-compact thead th, .table-compact tbody td{padding:8px 10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:1px;}
+  .table-compact thead th:last-child, .table-compact tbody td:last-child{white-space:normal;}
+  thead th{text-align:left; padding:9px 14px; font-size:10.2px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-low); border-bottom:1px solid var(--border); background:var(--bg-2);}
+  tbody td{padding:9px 14px; border-bottom:1px solid var(--border-soft); color:var(--text-hi);}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:rgba(76,141,255,.045);}
+  .mono{font-family:'SF Mono',Consolas,monospace; font-size:11.4px;}
+  .cell-sub{color:var(--text-low); font-size:10.8px;}
+  .empty-row td{text-align:center; padding:22px; color:var(--text-low); font-size:12.2px;}
+  .scrollbox{max-height:280px; overflow-y:auto;}
+
+  .sample-chip{display:inline-block; background:var(--bg-3); border:1px solid var(--border); color:var(--text-low); font-size:9px; font-weight:700; padding:1px 6px; border-radius:8px; letter-spacing:.3px; margin-left:6px; vertical-align:middle;}
+
+  /* Business-vs-technical label clarity (a business user should never have
+     to guess what a metric means - rename or explain, per that principle). */
+  .legend-note{font-size:11.5px; color:var(--text-mid); line-height:1.6; margin:-6px 0 14px; padding:10px 14px; background:var(--bg-2); border:1px solid var(--border-soft); border-radius:9px;}
+  .legend-note b{color:var(--text-hi);}
+  .mini-title{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border-soft); background:var(--bg-2); flex-wrap:wrap;}
+  .mt-label{font-size:12px; font-weight:800; color:var(--text-hi); display:flex; align-items:center; gap:7px;}
+  .mt-count{background:var(--bg-3); border:1px solid var(--border); border-radius:20px; padding:1px 9px; font-size:11px; font-weight:700; color:var(--text-mid);}
+  .mt-sub{font-size:10px; color:var(--text-low); cursor:help; border-bottom:1px dotted var(--text-low); white-space:nowrap;}
+  .cat-badge{font-size:8px; font-weight:800; padding:1px 6px; border-radius:8px; letter-spacing:.3px; text-transform:uppercase; margin-right:6px; cursor:help;}
+  .cat-business{background:var(--red-soft); color:#ff9fae;}
+  .cat-technical{background:#2a1a45; color:var(--purple);}
+  .cat-operational{background:var(--amber-soft); color:var(--amber);}
+
+  .grid-3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+  .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  .grid-4{display:grid; grid-template-columns:repeat(4,1fr); gap:16px;}
+  @media(max-width:1300px){.grid-3{grid-template-columns:1fr;} .grid-4{grid-template-columns:1fr 1fr;}}
+  @media(max-width:900px){.grid-2{grid-template-columns:1fr;} .grid-4{grid-template-columns:1fr;}}
+
+  .chart-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  @media(max-width:1100px){.chart-grid{grid-template-columns:1fr;}}
+  .chart-box{padding:18px 20px;}
+  .chart-title{font-size:12.5px; font-weight:700; color:var(--text-mid); margin-bottom:12px;}
+
+  .bars{display:flex; align-items:flex-end; gap:6px; height:140px; padding-top:6px;}
+  .bar{flex:1; background:linear-gradient(180deg, var(--brand), #2a5cc9); border-radius:4px 4px 0 0; min-height:2px; position:relative;}
+  .bar-label{position:absolute; bottom:-18px; left:0; right:0; text-align:center; font-size:9px; color:var(--text-low);}
+
+  .gauge-row{display:flex; gap:16px; justify-content:space-around; padding:6px 0;}
+  .gauge{display:flex; flex-direction:column; align-items:center; gap:8px;}
+  .gauge-ring{width:96px; height:96px; border-radius:50%; display:flex; align-items:center; justify-content:center; position:relative;}
+  .gauge-ring svg{position:absolute; top:0; left:0; transform:rotate(-90deg);}
+  .gauge-val{font-size:16px; font-weight:800; z-index:2;}
+  .gauge-label{font-size:11px; color:var(--text-mid);}
+
+  .alerts-list{display:flex; flex-direction:column; max-height:320px; overflow-y:auto;}
+  .alert-row{display:flex; gap:11px; align-items:flex-start; padding:10px 16px; border-bottom:1px solid var(--border-soft);}
+  .alert-row:last-child{border-bottom:none;}
+  .alert-dot{width:8px;height:8px;border-radius:50%; margin-top:5px; flex-shrink:0;}
+  .sev-CRITICAL{background:var(--crit); box-shadow:0 0 6px var(--crit);} .sev-HIGH{background:var(--red);}
+  .sev-MEDIUM{background:var(--amber);} .sev-INFORMATION{background:var(--info);}
+  .sev-badge{font-size:8.5px; font-weight:800; padding:1px 6px; border-radius:8px; letter-spacing:.3px; margin-right:7px; text-transform:uppercase; flex-shrink:0;}
+  .sevb-CRITICAL{background:var(--crit-soft); color:var(--crit);} .sevb-HIGH{background:var(--red-soft); color:var(--red);}
+  .sevb-MEDIUM{background:var(--amber-soft); color:var(--amber);} .sevb-INFORMATION{background:var(--info-soft); color:var(--info);}
+  .alert-msg{font-size:12px;}
+  .alert-meta{font-size:10.3px; color:var(--text-low); margin-top:2px;}
+
+  .refresh-note{font-size:10.5px; color:var(--text-low); padding:10px 16px; border-top:1px solid var(--border-soft); text-align:right;}
+  ::-webkit-scrollbar{width:8px; height:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--border); border-radius:8px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+
+  /* Auto-refresh control bar (Requirement 7) */
+  .refresh-bar{display:flex; align-items:center; justify-content:flex-end; gap:18px; margin:6px 0 4px; flex-wrap:wrap;}
+  .refresh-bar .rf-item{font-size:11px; color:var(--text-mid);}
+  .refresh-bar .rf-item b{color:var(--text-hi);}
+  .refresh-btn{background:var(--brand-soft); border:1px solid #2a4d80; color:var(--brand); font-size:11.5px; font-weight:700; padding:6px 14px; border-radius:8px; cursor:pointer;}
+  .refresh-btn:hover{background:#234061;}
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">M</div>
+      <div class="brand-text">
+        <div class="title">OMS-360 Enterprise Monitoring Center</div>
+        <div class="subtitle">Application, database, Kafka &amp; API health &mdash; live from the running service</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div class="nav-switch">
+        <a href="/dashboard/operations">Operations</a>
+        <a class="active" href="/dashboard/monitoring">Monitoring</a>
+        <a href="/dashboard/inventory">Inventory</a>
+        <a href="/dashboard/ai-copilot">AI Copilot</a>
+      </div>
+      <div class="live-strip" id="liveStrip">
+        <div class="ls-item"><span class="ls-label">Backend</span><span class="ls-value ls-UNKNOWN" id="lsBackend"><span class="ls-dot"></span>&hellip;</span></div>
+        <div class="ls-item"><span class="ls-label">Database</span><span class="ls-value ls-UNKNOWN" id="lsDatabase"><span class="ls-dot"></span>&hellip;</span></div>
+        <div class="ls-item"><span class="ls-label">Kafka</span><span class="ls-value ls-UNKNOWN" id="lsKafka"><span class="ls-dot"></span>&hellip;</span></div>
+        <div class="ls-item"><span class="ls-label">Last Refresh</span><span class="ls-value" id="lsLastRefresh" style="color:var(--text-hi);">&ndash;</span></div>
+        <div class="ls-item"><span class="ls-label">Interval</span><span class="ls-value" style="color:var(--text-hi);">6s</span></div>
+        <div class="ls-item"><span class="ls-label">Connected Since</span><span class="ls-value" id="lsConnectedSince" style="color:var(--text-hi);">&ndash;</span></div>
+      </div>
+      <div class="clock" id="clock">--</div>
+    </div>
+  </div>
+
+  <div class="page">
+
+    <div class="conn-banner" id="connBanner">
+      &#9888; Could not reach the OMS-360 API. Showing the last data received. Retrying automatically&hellip;
+    </div>
+
+    <div class="down-banner" id="downBanner">
+      <div class="db-title">&#128680; One or more dependencies are DOWN</div>
+      <div class="db-list" id="downBannerList"></div>
+    </div>
+
+    <!-- ============================================================= -->
+    <!-- SECTION 1 - HIGHEST PRIORITY: Failed / Duplicate / DLQ / Critical -->
+    <!-- ============================================================= -->
+    <div class="section-title">
+      <h2><span class="icon-chip" style="background:var(--crit-soft);color:var(--crit);">&#9888;</span> Immediate Attention Required
+        <span class="priority-badge">Top Priority</span></h2>
+    </div>
+    <div class="legend-note">
+      <b>Business failures</b> (Failed Orders, Duplicate Orders, Payment Failures) are order-level problems a customer or support agent would recognize &mdash; a payment was rejected, an order didn't go through, the same order was submitted twice.
+      <b>Technical failures</b> (Dead Letter Queue / DLQ) are backend messaging errors &mdash; Kafka events the system could not process after automatic retries. They are tracked separately because different teams act on them: support/ops on business failures, engineering on technical ones. A business failure is <i>not</i> the same thing as a DLQ entry, even when both relate to the same order.
+    </div>
+    <div class="grid-4">
+      <div class="panel">
+        <div class="mini-title">
+          <div class="mt-label"><span class="cat-badge cat-business" title="Business failure: an order-level problem visible to customers or support - not a backend messaging error.">BUSINESS</span>Failed Orders</div>
+          <span class="mt-count" id="failedCount"></span>
+        </div>
+        <div class="table-wrap scrollbox table-compact">
+          <table>
+            <thead><tr><th>Order</th><th>Reason</th><th>At</th></tr></thead>
+            <tbody id="failedBody"><tr class="empty-row"><td colspan="3">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="mini-title">
+          <div class="mt-label"><span class="cat-badge cat-business" title="Business failure: the same order was submitted more than once (double-tap, app retry, etc) - not a backend messaging error.">BUSINESS</span>Duplicate Orders</div>
+          <span class="mt-count" id="dupCount"></span>
+        </div>
+        <div class="table-wrap scrollbox table-compact">
+          <table>
+            <thead><tr><th>Marker</th><th>Idem. Key</th><th>At</th></tr></thead>
+            <tbody id="dupBody"><tr class="empty-row"><td colspan="3">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="mini-title">
+          <div class="mt-label"><span class="cat-badge cat-technical" title="Technical Processing Failure (DLQ): a message Kafka could not process after automatic retries. Engineering-only - distinct from the business failures on the left, even for the same order.">TECHNICAL</span>Dead Letter Queue (DLQ)</div>
+          <span class="mt-count" id="dlqCount"></span>
+        </div>
+        <div class="table-wrap scrollbox table-compact">
+          <table>
+            <thead><tr><th>Order</th><th>Txn</th><th>At</th></tr></thead>
+            <tbody id="dlqBody"><tr class="empty-row"><td colspan="3">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="mini-title">
+          <div class="mt-label">Critical Alerts</div>
+          <span class="mt-count" id="criticalCount"></span>
+        </div>
+        <div class="alerts-list scrollbox" id="criticalAlertsList" style="max-height:none; height:100%;">
+          <div class="empty-row">Loading&hellip;</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Overall status hero - moved below Critical Alerts per requirement 8 -->
+    <div class="panel" style="margin-top:18px;">
+      <div class="hero">
+        <div class="hero-status hero-HEALTHY" id="heroStatus"><span class="hdot"></span><span id="heroStatusText">CHECKING&hellip;</span></div>
+        <div class="hero-meta">
+          <div class="hm">Environment<b id="heroEnv">-</b></div>
+          <div class="hm">Build Version<b id="heroBuild">-</b></div>
+          <div class="hm">DB Response Time<b id="heroDbTime">-</b></div>
+          <div class="hm">Last Checked<b id="heroChecked">-</b></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================= -->
+    <!-- SECTION 2 - Active / Recent Alerts + Low Stock / Out of Stock / -->
+    <!-- Kitchen Delays / Payment Failures, sorted Critical>High>Medium>Info -->
+    <!-- ============================================================= -->
+    <div class="section-title">
+      <h2><span class="icon-chip" style="background:var(--amber-soft);color:var(--amber);">&#128276;</span> Alerts &amp; Operational Issues
+        <span class="badge">Sorted: Critical &rarr; High &rarr; Medium &rarr; Information</span></h2>
+    </div>
+    <div class="grid-2">
+      <div class="panel">
+        <div class="alerts-list" id="activeAlertsList"><div class="empty-row">Loading&hellip;</div></div>
+        <div class="refresh-note">Active Alerts (currently ongoing) <span id="activeCount"></span></div>
+      </div>
+      <div class="panel">
+        <div class="alerts-list" id="recentAlertsList"><div class="empty-row">Loading&hellip;</div></div>
+        <div class="refresh-note">Recent Alerts (event feed) <span id="recentCount"></span></div>
+      </div>
+    </div>
+
+    <div class="grid-4" style="margin-top:16px;">
+      <div class="panel">
+        <div class="mini-title">
+          <div class="mt-label"><span class="cat-badge cat-operational" title="Operational: an inventory item is running low and may need restocking soon.">OPS</span>Low Stock</div>
+        </div>
+        <div class="table-wrap scrollbox table-compact">
+          <table>
+            <thead><tr><th>Item</th><th>Left</th></tr></thead>
+            <tbody id="lowStockBody"><tr class="empty-row"><td colspan="2">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="mini-title">
+          <div class="mt-label"><span class="cat-badge cat-operational" title="Operational: an inventory item has zero stock left and cannot be sold until restocked.">OPS</span>Out of Stock</div>
+        </div>
+        <div class="table-wrap scrollbox table-compact">
+          <table>
+            <thead><tr><th>Item</th><th>Left</th></tr></thead>
+            <tbody id="outStockBody"><tr class="empty-row"><td colspan="2">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="mini-title">
+          <div class="mt-label"><span class="cat-badge cat-operational" title="Operational: an order still being cooked past its expected ready time.">OPS</span>Kitchen Delays</div>
+        </div>
+        <div class="table-wrap scrollbox table-compact">
+          <table>
+            <thead><tr><th>Order</th><th title="How far past the expected cooking-completion time this order currently is">Overdue By</th></tr></thead>
+            <tbody id="kitchenDelayBody"><tr class="empty-row"><td colspan="2">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="mini-title">
+          <div class="mt-label"><span class="cat-badge cat-business" title="Business failure: a customer's payment attempt did not succeed (card declined, gateway timeout, etc).">BUSINESS</span>Payment Failures</div>
+        </div>
+        <div class="table-wrap scrollbox table-compact">
+          <table>
+            <thead><tr><th>Order</th><th>Amount</th></tr></thead>
+            <tbody id="paymentFailBody"><tr class="empty-row"><td colspan="2">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================= -->
+    <!-- SECTION 3 - Live System Health (summarizes, doesn't lead) -->
+    <!-- ============================================================= -->
+    <div class="section-title">
+      <h2><span class="icon-chip" style="background:var(--brand-soft);color:var(--brand);">&#9881;</span> Live System Health
+        <span class="badge">Summary &mdash; not the top priority view</span></h2>
+    </div>
+    <div class="tile-grid cols-7" id="healthTiles">
+      <div class="tile"><div class="tile-name">Backend</div><div class="tile-value">&hellip;</div></div>
+      <div class="tile"><div class="tile-name">Database</div><div class="tile-value">&hellip;</div></div>
+      <div class="tile"><div class="tile-name">Kafka</div><div class="tile-value">&hellip;</div></div>
+      <div class="tile"><div class="tile-name">Docker</div><div class="tile-value">&hellip;</div></div>
+      <div class="tile"><div class="tile-name">Consumer</div><div class="tile-value">&hellip;</div></div>
+      <div class="tile"><div class="tile-name">API Response</div><div class="tile-value">&hellip;</div></div>
+      <div class="tile"><div class="tile-name">DB Response</div><div class="tile-value">&hellip;</div></div>
+    </div>
+
+    <div class="refresh-bar">
+      <div class="rf-item">Last Updated: <b id="rbLastUpdated">-</b></div>
+      <div class="rf-item">Next Refresh: <b id="rbNextRefresh">-</b></div>
+      <button class="refresh-btn" id="rbManualRefresh">&#8635; Refresh Now</button>
+    </div>
+
+    <!-- Live Summaries -->
+    <div class="section-title">
+      <h2><span class="icon-chip" style="background:var(--green-soft);color:var(--green);">&#128202;</span> Live Summaries</h2>
+    </div>
+    <div class="tile-grid" id="summaryTiles">
+      <div class="tile"><div class="tile-name">Inventory Summary</div><div class="tile-value">&hellip;</div></div>
+      <div class="tile"><div class="tile-name">Kafka Summary</div><div class="tile-value">&hellip;</div></div>
+      <div class="tile"><div class="tile-name">API Summary</div><div class="tile-value">&hellip;</div></div>
+      <div class="tile"><div class="tile-name">DLQ</div><div class="tile-value">&hellip;</div></div>
+    </div>
+
+    <!-- Reliability KPI strip -->
+    <div class="section-title">
+      <h2><span class="icon-chip" style="background:var(--amber-soft);color:var(--amber);">&#9888;</span> Reliability Counters</h2>
+    </div>
+    <div class="kpi-strip">
+      <div class="kpi-cell c-red"><div class="kv" id="rc-dlq">0</div><div class="kl" title="Technical Processing Failures: Kafka messages that failed after automatic retries. Not the same as Failed Orders below.">DLQ Messages (Technical)</div></div>
+      <div class="kpi-cell c-amber"><div class="kv" id="rc-duplicate">0</div><div class="kl" title="Business failure: the same order submitted more than once.">Duplicate Orders (Business)</div></div>
+      <div class="kpi-cell c-red"><div class="kv" id="rc-failed">0</div><div class="kl" title="Business failure: an order that failed during processing - not a DLQ/technical event.">Failed Orders (Business)</div></div>
+      <div class="kpi-cell c-cyan"><div class="kv" id="rc-retry">0</div><div class="kl">Retry Queue</div></div>
+      <div class="kpi-cell c-blue"><div class="kv" id="rc-api-total">0</div><div class="kl">API Requests</div></div>
+      <div class="kpi-cell c-purple"><div class="kv" id="rc-api-err">0</div><div class="kl">API 4xx / 5xx</div></div>
+    </div>
+
+    <!-- Performance charts -->
+    <div class="section-title">
+      <h2><span class="icon-chip" style="background:#12314a;color:var(--cyan);">&#128200;</span> Performance</h2>
+    </div>
+    <div class="chart-grid">
+      <div class="panel chart-box">
+        <div class="chart-title">CPU &middot; Memory &middot; Disk Usage</div>
+        <div class="gauge-row" id="gaugeRow"></div>
+      </div>
+      <div class="panel chart-box">
+        <div class="chart-title">API Response Time by Endpoint (avg ms)</div>
+        <div class="bars" id="apiBars" style="position:relative; padding-bottom:20px;"></div>
+      </div>
+    </div>
+
+    <div style="height:24px;"></div>
+  </div>
+
+<script>
+  const REFRESH_MS = 6000;
+  const esc = (s) => (s===null||s===undefined) ? '' : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmtTime = (iso) => { if(!iso) return '-'; const d = new Date(iso); return d.toLocaleString('en-IN', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); };
+  const fmtClock = (d) => d.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const money = (n) => '₹' + Number(n||0).toLocaleString('en-IN', {maximumFractionDigits:0});
+  const sampleChip = (isSample) => isSample ? '<span class="sample-chip" title="Inserted by database/demo_seed.sql - not a live runtime record">SAMPLE</span>' : '';
+
+  // Human-readable "overdue by" duration, instead of a raw seconds count
+  // like "+258475s" that a business user can't parse at a glance.
+  const fmtDuration = (totalSeconds) => {
+    const s = Math.max(0, Math.round(Number(totalSeconds) || 0));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (h > 0) return `${h}h ${m}m late`;
+    if (m > 0) return `${m}m ${sec}s late`;
+    return `${sec}s late`;
+  };
+
+  // Classifies an alert's raw event `type` into the same Business / Technical
+  // / Operational grouping used across the dashboard, so the alert feeds in
+  // Section 2 are visually distinguishable, not just via small gray text.
+  function categoryForType(type){
+    const t = String(type||'').toUpperCase();
+    if(t.includes('DLQ') || t.includes('DEAD_LETTER') || t.includes('CONSUMER') || t.includes('KAFKA') || t.includes('RETRY'))
+      return {cls:'cat-technical', label:'TECHNICAL', title:'Technical Processing Failure: an internal messaging/system error (e.g. DLQ), not a customer-facing business event.'};
+    if(t.includes('LOW_STOCK') || t.includes('OUT_OF_STOCK') || t.includes('KITCHEN') || t.includes('DELAY'))
+      return {cls:'cat-operational', label:'OPERATIONAL', title:'Operational issue: an inventory/kitchen condition needing attention - not a system failure.'};
+    return {cls:'cat-business', label:'BUSINESS', title:'Business event: something in the customer order/payment flow that support or ops may need to review.'};
+  }
+
+  let connectedSince = null;
+  let nextRefreshAt = null;
+
+  function setClock(){
+    document.getElementById('clock').textContent = new Date().toLocaleString('en-IN', {weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    if(nextRefreshAt){
+      const secsLeft = Math.max(0, Math.round((nextRefreshAt - Date.now())/1000));
+      document.getElementById('rbNextRefresh').textContent = secsLeft + 's';
+    }
+  }
+  setInterval(setClock, 1000); setClock();
+
+  async function fetchJSON(url){
+    const res = await fetch(url, {cache:'no-store'});
+    if(!res.ok) throw new Error(url + ' -> ' + res.status);
+    return res.json();
+  }
+  function showConnError(show){ document.getElementById('connBanner').classList.toggle('show', show); }
+
+  function statusTileClass(s){ return 'ts-' + String(s||'UNKNOWN').toUpperCase().split(' ')[0].replace(/[^A-Z_]/g,''); }
+  function lsClass(s){ return 'ls-' + String(s||'UNKNOWN').toUpperCase().split(' ')[0].replace(/[^A-Z_]/g,''); }
+
+  function gauge(label, pct, color){
+    const r = 40, c = 2*Math.PI*r;
+    const dash = c * Math.min(100, pct) / 100;
+    return `
+    <div class="gauge">
+      <div class="gauge-ring">
+        <svg width="96" height="96">
+          <circle cx="48" cy="48" r="${r}" stroke="#1c2434" stroke-width="8" fill="none"/>
+          <circle cx="48" cy="48" r="${r}" stroke="${color}" stroke-width="8" fill="none"
+            stroke-dasharray="${dash} ${c}" stroke-linecap="round"/>
+        </svg>
+        <div class="gauge-val">${Math.round(pct)}%</div>
+      </div>
+      <div class="gauge-label">${label}</div>
+    </div>`;
+  }
+
+  function renderAlertList(elId, alerts, emptyMsg){
+    const el = document.getElementById(elId);
+    el.innerHTML = alerts.length ? alerts.map(a => {
+      const cat = categoryForType(a.type);
+      return `
+      <div class="alert-row">
+        <span class="alert-dot sev-${esc(a.severity)}"></span>
+        <div>
+          <div class="alert-msg"><span class="sev-badge sevb-${esc(a.severity)}">${esc(a.severity)}</span>${esc(a.message)}${sampleChip(a.is_sample)}</div>
+          <div class="alert-meta"><span class="cat-badge ${cat.cls}" title="${esc(cat.title)}">${cat.label}</span>${esc(a.type)} &middot; ${fmtTime(a.occurred_at)}</div>
+        </div>
+      </div>`;
+    }).join('') : `<div class="empty-row">${emptyMsg}</div>`;
+  }
+
+  async function refreshAll(manual){
+    try{
+      const [health, mon] = await Promise.all([
+        fetchJSON('/health'),
+        fetchJSON('/api/v1/dashboard/monitoring'),
+      ]);
+
+      if(!connectedSince){
+        connectedSince = new Date();
+        document.getElementById('lsConnectedSince').textContent = fmtClock(connectedSince);
+      }
+      const now = new Date();
+      document.getElementById('lsLastRefresh').textContent = fmtClock(now);
+      document.getElementById('rbLastUpdated').textContent = fmtClock(now);
+      nextRefreshAt = Date.now() + REFRESH_MS;
+
+      // Dependency-down banner (Requirement 5)
+      const downList = [];
+      if(mon.database.status !== 'UP') downList.push(`Database: ${esc(mon.database.status)}${mon.database.error ? ' - ' + esc(mon.database.error) : ''}`);
+      if((mon.kafka.status || (mon.kafka.broker_reachable?'UP':'DOWN')) === 'DOWN') downList.push('Kafka broker: DOWN');
+      if(mon.consumer && mon.consumer.status === 'DOWN') downList.push(`Consumer: DOWN - ${esc(mon.consumer.note||'')}`);
+      const downBanner = document.getElementById('downBanner');
+      if(downList.length){
+        document.getElementById('downBannerList').innerHTML = downList.join('<br>');
+        downBanner.classList.add('show');
+      } else {
+        downBanner.classList.remove('show');
+      }
+
+      // Live status strip (Requirement 4)
+      const backendLs = document.getElementById('lsBackend');
+      backendLs.className = 'ls-value ' + lsClass(health.status === 'HEALTHY' ? 'UP' : (health.status === 'WARNING' ? 'WARNING' : 'DOWN'));
+      backendLs.innerHTML = `<span class="ls-dot"></span>${esc(health.status)}`;
+      const dbLs = document.getElementById('lsDatabase');
+      dbLs.className = 'ls-value ' + lsClass(mon.database.status);
+      dbLs.innerHTML = `<span class="ls-dot"></span>${esc(mon.database.status)}`;
+      const kafkaStatusVal = mon.kafka.status || (mon.kafka.broker_reachable?'UP':'DOWN');
+      const kafkaLs = document.getElementById('lsKafka');
+      kafkaLs.className = 'ls-value ' + lsClass(kafkaStatusVal);
+      kafkaLs.innerHTML = `<span class="ls-dot"></span>${esc(kafkaStatusVal)}`;
+
+      // Hero (moved below Critical Alerts, Requirement 8)
+      const heroEl = document.getElementById('heroStatus');
+      heroEl.className = 'hero-status hero-' + health.status;
+      document.getElementById('heroStatusText').textContent = health.status;
+      document.getElementById('heroEnv').textContent = mon.application_health.environment;
+      document.getElementById('heroBuild').textContent = mon.application_health.build_version;
+      document.getElementById('heroDbTime').textContent = (mon.database.response_time_ms ?? '-') + ' ms';
+      document.getElementById('heroChecked').textContent = new Date(mon.generated_at + 'Z').toLocaleTimeString('en-IN');
+
+      // Section 1: Failed / Duplicate / DLQ / Critical Alerts
+      const failedBody = document.getElementById('failedBody');
+      document.getElementById('failedCount').textContent = mon.failed_orders.total;
+      failedBody.innerHTML = mon.failed_orders.recent.length ? mon.failed_orders.recent.map(f => `
+        <tr><td class="mono">${esc(f.order_id)}${sampleChip(f.is_sample)}</td><td class="cell-sub">${esc((f.reason||'').slice(0,60))}</td><td class="cell-sub">${fmtTime(f.failed_at)}</td></tr>
+      `).join('') : '<tr class="empty-row"><td colspan="3">No failed orders. System healthy.</td></tr>';
+
+      const dupBody = document.getElementById('dupBody');
+      document.getElementById('dupCount').textContent = mon.duplicate_orders.total;
+      dupBody.innerHTML = mon.duplicate_orders.recent.length ? mon.duplicate_orders.recent.map(d => `
+        <tr><td class="mono">${esc(d.order_id)}${sampleChip(d.is_sample)}</td><td class="mono cell-sub">${esc(d.transaction_id)}</td><td class="cell-sub">${fmtTime(d.detected_at)}</td></tr>
+      `).join('') : '<tr class="empty-row"><td colspan="3">No duplicate requests detected.</td></tr>';
+
+      const dlqBody = document.getElementById('dlqBody');
+      document.getElementById('dlqCount').textContent = mon.dlq.total_dlq_messages;
+      dlqBody.innerHTML = mon.dlq.most_recent.length ? mon.dlq.most_recent.map(q => `
+        <tr><td class="mono">${esc(q.order_id)}${sampleChip(q.is_sample)}</td><td class="mono cell-sub">${esc(q.transaction_id)}</td><td class="cell-sub">${fmtTime(q.moved_at)}</td></tr>
+      `).join('') : '<tr class="empty-row"><td colspan="3">Empty. Nothing in the DLQ.</td></tr>';
+
+      document.getElementById('criticalCount').textContent = mon.critical_alerts.length;
+      renderAlertList('criticalAlertsList', mon.critical_alerts, 'No critical alerts.');
+
+      // Section 2: Active / Recent Alerts + 4 issue tables
+      document.getElementById('activeCount').textContent = mon.active_alerts.length;
+      renderAlertList('activeAlertsList', mon.active_alerts, 'Nothing currently active.');
+      document.getElementById('recentCount').textContent = mon.recent_alerts.length;
+      renderAlertList('recentAlertsList', mon.recent_alerts, 'No recent alerts.');
+
+      document.getElementById('lowStockBody').innerHTML = mon.low_stock_items.length ? mon.low_stock_items.map(i => `
+        <tr><td>${esc(i.item_name)}</td><td class="mono">${i.remaining_stock}/${i.total_stock}</td></tr>
+      `).join('') : '<tr class="empty-row"><td colspan="2">None</td></tr>';
+
+      document.getElementById('outStockBody').innerHTML = mon.out_of_stock_items.length ? mon.out_of_stock_items.map(i => `
+        <tr><td>${esc(i.item_name)}</td><td class="mono">0/${i.total_stock}</td></tr>
+      `).join('') : '<tr class="empty-row"><td colspan="2">None</td></tr>';
+
+      document.getElementById('kitchenDelayBody').innerHTML = mon.kitchen_delays.recent.length ? mon.kitchen_delays.recent.map(k => `
+        <tr><td class="mono">${esc(k.order_id)}${sampleChip(k.is_sample)}</td><td class="cell-sub" title="${k.overdue_seconds}s past expected ready time">${fmtDuration(k.overdue_seconds)}</td></tr>
+      `).join('') : '<tr class="empty-row"><td colspan="2">None</td></tr>';
+
+      document.getElementById('paymentFailBody').innerHTML = mon.payment_failures.recent.length ? mon.payment_failures.recent.map(p => `
+        <tr><td class="mono">${esc(p.order_id)}${sampleChip(p.is_sample)}</td><td class="cell-sub">${money(p.amount)}</td></tr>
+      `).join('') : '<tr class="empty-row"><td colspan="2">None</td></tr>';
+
+      // Section 3: Live System Health (7 tiles) - summary, not lead
+      const pool = mon.database.pool || {};
+      const consumerStatus = (mon.consumer && mon.consumer.status) || 'UNKNOWN';
+      const endpoints = Object.entries(mon.api_summary.endpoints || {});
+      const avgApiMs = endpoints.length ? Math.round(endpoints.reduce((s,[,v]) => s + v.avg_ms, 0) / endpoints.length) : null;
+      document.getElementById('healthTiles').innerHTML = `
+        <div class="tile ${health.status==='DEGRADED'?'tile-down':''}">
+          <div class="tile-head"><div class="tile-name">&#128421; Backend</div><span class="tile-status ${statusTileClass(health.status==='HEALTHY'?'UP':health.status)}">${esc(health.status)}</span></div>
+          <div class="tile-value">${esc(mon.application_health.environment)}</div>
+          <div class="tile-sub">Build ${esc(mon.application_health.build_version)}</div>
+        </div>
+        <div class="tile ${mon.database.status!=='UP'?'tile-down':''}">
+          <div class="tile-head"><div class="tile-name">&#128451; Database</div><span class="tile-status ${statusTileClass(mon.database.status)}">${esc(mon.database.status)}</span></div>
+          <div class="tile-value">${mon.database.response_time_ms ?? '-'} ms</div>
+          <div class="tile-sub">Pool: ${pool.checked_out ?? 0}/${pool.size ?? 0} in use</div>
+        </div>
+        <div class="tile ${kafkaStatusVal==='DOWN'?'tile-down':''}">
+          <div class="tile-head"><div class="tile-name">&#128268; Kafka</div><span class="tile-status ${statusTileClass(kafkaStatusVal)}">${esc(kafkaStatusVal)}</span></div>
+          <div class="tile-value">${mon.kafka.total_topics_visible ?? 0} topics</div>
+          <div class="tile-sub">Producer: ${esc(mon.kafka_producer_status)}</div>
+        </div>
+        <div class="tile">
+          <div class="tile-head"><div class="tile-name">&#128230; Docker</div><span class="tile-status ${statusTileClass(mon.docker_status)}">${esc(mon.docker_status)}</span></div>
+          <div class="tile-value">${mon.docker_status === 'CONTAINERIZED' ? 'Containerized' : 'Local'}</div>
+          <div class="tile-sub">Runtime mode</div>
+        </div>
+        <div class="tile ${consumerStatus==='DOWN'?'tile-down':''}">
+          <div class="tile-head"><div class="tile-name">&#9881; Consumer</div><span class="tile-status ${statusTileClass(consumerStatus)}">${esc(consumerStatus)}</span></div>
+          <div class="tile-value">${esc(consumerStatus)}</div>
+          <div class="tile-sub" title="${esc((mon.consumer||{}).note||'')}">${esc(((mon.consumer||{}).note||'').slice(0,40))}</div>
+        </div>
+        <div class="tile">
+          <div class="tile-head"><div class="tile-name">&#9201; API Response</div></div>
+          <div class="tile-value">${avgApiMs ?? '-'} ms</div>
+          <div class="tile-sub">avg across ${endpoints.length} endpoints</div>
+        </div>
+        <div class="tile">
+          <div class="tile-head"><div class="tile-name">&#9201; DB Response</div></div>
+          <div class="tile-value">${mon.database.response_time_ms ?? '-'} ms</div>
+          <div class="tile-sub">last SELECT 1 probe</div>
+        </div>`;
+
+      // Live Summaries
+      const inv = mon.inventory_summary, kf = mon.kafka_summary, api = mon.api_summary, dlq = mon.dlq;
+      document.getElementById('summaryTiles').innerHTML = `
+        <div class="tile">
+          <div class="tile-head"><div class="tile-name">&#128717; Inventory</div></div>
+          <div class="tile-value">${inv.total_items}</div>
+          <div class="tile-sub">${inv.low_stock_count} low &middot; ${inv.out_of_stock_count} out &middot; ${money(inv.total_stock_value)} value</div>
+        </div>
+        <div class="tile">
+          <div class="tile-head"><div class="tile-name">&#128268; Kafka Traffic</div></div>
+          <div class="tile-value">${kf.publish_success_total}</div>
+          <div class="tile-sub">Published &middot; ${kf.consume_success_total} consumed &middot; ${kf.publish_dlq_total} to DLQ</div>
+        </div>
+        <div class="tile">
+          <div class="tile-head"><div class="tile-name">&#127760; API Traffic</div></div>
+          <div class="tile-value">${api.total_requests}</div>
+          <div class="tile-sub">${api.requests_4xx} client errors &middot; ${api.requests_5xx} server errors</div>
+        </div>
+        <div class="tile">
+          <div class="tile-head"><div class="tile-name" title="Technical Processing Failures: Kafka messages that could not be processed after automatic retries. Different from Failed Orders / Duplicate Orders, which are business-level.">&#9888; Dead Letter Queue (DLQ)</div></div>
+          <div class="tile-value">${dlq.total_dlq_messages}</div>
+          <div class="tile-sub">Technical processing failures &middot; most recent: ${dlq.most_recent[0] ? esc(dlq.most_recent[0].order_id) : 'none'}</div>
+        </div>`;
+
+      // Reliability counters
+      document.getElementById('rc-dlq').textContent = dlq.total_dlq_messages;
+      document.getElementById('rc-duplicate').textContent = mon.duplicate_orders.total;
+      document.getElementById('rc-failed').textContent = mon.failed_orders.total;
+      document.getElementById('rc-retry').textContent = (mon.retry_queue.kafka_publish_retry_total || 0) + (mon.retry_queue.kafka_consume_retry_total || 0);
+      document.getElementById('rc-api-total').textContent = api.total_requests;
+      document.getElementById('rc-api-err').textContent = api.requests_4xx + api.requests_5xx;
+
+      // Gauges
+      const cpu = mon.performance.cpu.percent_used ?? 0;
+      const mem = mon.performance.memory.percent_used ?? 0;
+      const disk = mon.performance.disk.percent_used ?? 0;
+      const gcolor = (v) => v > 85 ? '#f4415c' : (v > 65 ? '#f5a524' : '#22c58b');
+      document.getElementById('gaugeRow').innerHTML =
+        gauge('CPU', cpu, gcolor(cpu)) + gauge('Memory', mem, gcolor(mem)) + gauge('Disk', disk, gcolor(disk));
+
+      const barsEl = document.getElementById('apiBars');
+      if(!endpoints.length){
+        barsEl.innerHTML = '<div class="empty-row" style="flex:1;">No API traffic recorded yet.</div>';
+      } else {
+        const maxMs = Math.max(...endpoints.map(([,v]) => v.avg_ms), 1);
+        barsEl.innerHTML = endpoints.slice(0,8).map(([path, v]) => {
+          const h = Math.max(3, Math.round((v.avg_ms / maxMs) * 120));
+          return `<div class="bar" style="height:${h}px;" title="${esc(path)}: ${v.avg_ms}ms avg, ${v.count} calls">
+                    <span class="bar-label">${esc(path.split(' ')[1] || path).slice(0,10)}</span>
+                  </div>`;
+        }).join('');
+      }
+
+      showConnError(false);
+    }catch(err){
+      console.error('Monitoring refresh failed:', err);
+      showConnError(true);
+    }
+  }
+
+  document.getElementById('rbManualRefresh').addEventListener('click', () => refreshAll(true));
+
+  refreshAll();
+  setInterval(refreshAll, REFRESH_MS);
+</script>
+</body>
+</html>

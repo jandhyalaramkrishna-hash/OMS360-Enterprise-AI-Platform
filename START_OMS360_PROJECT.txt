@@ -1,0 +1,111 @@
+=========================================================
+OMS360 Enterprise AI Platform v1.0.0
+Developed by ZelQA Technologies
+
+Daily Startup Checklist
+
+=========================================================
+
+STEP 1
+Start Docker Desktop.
+docker-compose up -d
+
+TO DOWN THE DOCKER 
+docker compose down
+
+Wait until Docker Desktop shows:
+
+✓ Engine Running
+
+---------------------------------------------------------
+
+STEP 2
+
+Open PowerShell.
+
+Go to the project folder.
+
+Example:
+
+cd C:\Project-5-OMS360-Food-Delivery-AI-Enterprise-Platform
+
+---------------------------------------------------------
+
+STEP 3
+
+Check Docker containers.
+
+Command:
+
+docker ps
+
+Verify the required containers.
+
+Examples:
+
+✓ kafka
+✓ zookeeper
+✓ mysql (OMS360)
+
+---------------------------------------------------------
+
+STEP 4
+
+If MySQL container is NOT running:
+
+Start it.
+
+Example:
+
+docker start oms360_mysql
+
+If the container does not exist, recreate it using the
+project Docker configuration.
+
+---------------------------------------------------------
+
+STEP 5
+
+Open another PowerShell window.
+
+Go to the project folder.
+
+Run:
+
+START_OMS360.bat
+
+(or whichever startup BAT is the official launcher.)
+
+---------------------------------------------------------
+
+STEP 6
+
+Wait until:
+
+✓ API starts
+✓ Swagger opens
+✓ Dashboard loads
+
+---------------------------------------------------------
+
+STEP 7
+
+Verify:
+
+• Create Order
+• Inventory Update
+• Kafka Events
+• SQL Database
+• AI Platform Health
+
+---------------------------------------------------------
+
+STEP 8
+
+When finished:
+
+Run STOP_OMS360.bat
+
+or stop the Docker containers.
+
+=========================================================

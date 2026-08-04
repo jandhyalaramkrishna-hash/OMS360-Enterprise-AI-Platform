@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OMS-360 | Enterprise Inventory Center</title>
+<style>
+  :root{
+    --bg-0:#0a0e14; --bg-1:#0f1420; --bg-2:#141b29; --bg-3:#1a2333;
+    --border:#242e42; --border-soft:#1c2434;
+    --text-hi:#eef2f9; --text-mid:#9fadc4; --text-low:#5f6d85;
+    --brand:#4c8dff; --brand-soft:#1c3252;
+    --green:#22c58b; --green-soft:#123527;
+    --amber:#f5a524; --amber-soft:#3a2a10;
+    --red:#f4415c; --red-soft:#3a1520;
+    --purple:#a78bfa; --cyan:#38d0e0;
+    --radius:12px; --radius-sm:8px;
+    font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:radial-gradient(1200px 800px at 50% -10%, #101b2e 0%, var(--bg-0) 45%) fixed; color:var(--text-hi); -webkit-font-smoothing:antialiased;}
+  a{color:inherit; text-decoration:none;}
+
+  .topbar{
+    position:sticky; top:0; z-index:50; display:flex; align-items:center; justify-content:space-between;
+    padding:14px 28px; background:rgba(10,14,20,0.85); backdrop-filter:blur(10px); border-bottom:1px solid var(--border-soft);
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand-mark{width:38px;height:38px;border-radius:10px; background:linear-gradient(135deg, var(--amber), var(--red)); display:flex;align-items:center;justify-content:center; font-weight:800; font-size:15px; color:#1a1000; box-shadow:0 4px 18px rgba(245,165,36,.3);}
+  .brand-text .title{font-size:16px; font-weight:700;}
+  .brand-text .subtitle{font-size:11.5px; color:var(--text-mid); margin-top:1px;}
+  .top-actions{display:flex; align-items:center; gap:14px;}
+  .nav-switch{display:flex; background:var(--bg-2); border:1px solid var(--border); border-radius:9px; padding:3px; gap:2px;}
+  .nav-switch a{padding:7px 14px; border-radius:7px; font-size:12.5px; font-weight:600; color:var(--text-mid);}
+  .nav-switch a.active{background:var(--brand); color:#fff;}
+  .live-pill{display:flex; align-items:center; gap:7px; background:var(--green-soft); border:1px solid #1d4a37; color:var(--green); font-size:11.5px; font-weight:700; padding:6px 12px; border-radius:20px;}
+  .live-dot{width:7px;height:7px;border-radius:50%; background:var(--green); animation:pulse 1.8s infinite;}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,139,.55);} 70%{box-shadow:0 0 0 8px rgba(34,197,139,0);} 100%{box-shadow:0 0 0 0 rgba(34,197,139,0);}}
+  .clock{font-size:11.5px; color:var(--text-mid); font-variant-numeric:tabular-nums; min-width:150px; text-align:right;}
+
+  .page{max-width:1600px; margin:0 auto; padding:22px 28px 60px;}
+  .section-title{display:flex; align-items:center; justify-content:space-between; margin:34px 0 14px;}
+  .section-title h2{font-size:15.5px; margin:0; display:flex; align-items:center; gap:9px;}
+  .section-title .badge{background:var(--bg-3); border:1px solid var(--border); color:var(--text-mid); font-size:11px; padding:3px 9px; border-radius:20px; font-weight:600;}
+  .icon-chip{width:26px;height:26px;border-radius:7px; display:flex;align-items:center;justify-content:center; font-size:13px;}
+
+  .panel{background:linear-gradient(180deg, var(--bg-2), var(--bg-1)); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;}
+
+  /* ---------- Summary cards ---------- */
+  .summary-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:14px;}
+  @media(max-width:1100px){ .summary-grid{grid-template-columns:repeat(2,1fr);} }
+  .summary-card{background:linear-gradient(180deg, var(--bg-2), var(--bg-1)); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px;}
+  .summary-card .sv{font-size:24px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.2;}
+  .summary-card .sl{font-size:11px; color:var(--text-mid); margin-top:4px; text-transform:uppercase; letter-spacing:.4px;}
+  .summary-card.c-blue .sv{color:var(--brand);}
+  .summary-card.c-green .sv{color:var(--green);}
+  .summary-card.c-amber .sv{color:var(--amber);}
+  .summary-card.c-red .sv{color:var(--red);}
+  .summary-card.c-cyan .sv{color:var(--cyan);}
+
+  /* ---------- Controls ---------- */
+  .controls-bar{display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:14px 18px;}
+  .controls-bar input[type=text]{
+    background:var(--bg-1); border:1px solid var(--border); color:var(--text-hi);
+    padding:8px 12px; border-radius:8px; font-size:12.5px; min-width:220px;
+  }
+  .controls-bar select{
+    background:var(--bg-1); border:1px solid var(--border); color:var(--text-hi);
+    padding:8px 12px; border-radius:8px; font-size:12.5px;
+  }
+  .controls-bar input::placeholder{color:var(--text-low);}
+  .controls-bar label.chk{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-mid); cursor:pointer;}
+  .controls-bar .spacer{flex:1;}
+  .last-updated{font-size:11px; color:var(--text-low);}
+  .btn{
+    background:var(--bg-2); border:1px solid var(--border); color:var(--text-hi);
+    padding:8px 14px; border-radius:8px; font-size:12.5px; font-weight:600; cursor:pointer;
+  }
+  .btn:hover{background:var(--bg-3);}
+
+  /* ---------- Table ---------- */
+  .table-wrap{overflow-x:auto;}
+  table{width:100%; border-collapse:collapse; font-size:12.6px; min-width:760px;}
+  thead th{
+    text-align:left; padding:11px 16px; font-size:10.5px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--text-low); border-bottom:1px solid var(--border); background:var(--bg-2); position:sticky; top:0;
+    white-space:nowrap;
+  }
+  thead th.sortable{cursor:pointer; user-select:none;}
+  thead th.sortable:hover{color:var(--text-hi);}
+  thead th .sort-arrow{font-size:9px; margin-left:4px; color:var(--text-low);}
+  tbody td{padding:11px 16px; border-bottom:1px solid var(--border-soft); color:var(--text-hi); vertical-align:middle; white-space:nowrap;}
+  tbody tr:hover{background:rgba(76,141,255,.045);}
+  tbody tr:last-child td{border-bottom:none;}
+  .mono{font-variant-numeric:tabular-nums; font-family:'SF Mono',Consolas,monospace; font-size:11.8px;}
+  .cell-sub{color:var(--text-low); font-size:11px;}
+  .empty-row td{text-align:center; padding:30px; color:var(--text-low); font-size:12.5px;}
+
+  .status-chip{display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:20px; font-size:10.8px; font-weight:700; letter-spacing:.2px; white-space:nowrap;}
+  .st-ACTIVE{background:var(--green-soft); color:var(--green);}
+  .st-LOW_STOCK{background:var(--amber-soft); color:var(--amber);}
+  .st-OUT_OF_STOCK{background:var(--red-soft); color:var(--red);}
+  .st-INACTIVE{background:var(--bg-3); color:var(--text-mid);}
+
+  .stock-bar-track{width:90px; height:5px; border-radius:5px; background:var(--bg-1); overflow:hidden; display:inline-block; vertical-align:middle; margin-left:8px;}
+  .stock-bar-fill{height:100%; border-radius:5px;}
+
+  .refresh-note{font-size:10.5px; color:var(--text-low); padding:10px 16px; border-top:1px solid var(--border-soft); text-align:right;}
+  ::-webkit-scrollbar{width:8px; height:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--border); border-radius:8px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+
+  .conn-banner{
+    display:none; align-items:center; gap:10px; background:var(--red-soft); border:1px solid #55212c;
+    color:var(--red); padding:10px 16px; border-radius:9px; font-size:12.5px; margin-bottom:18px; font-weight:600;
+  }
+  .conn-banner.show{display:flex;}
+
+  /* ---------- Inventory Management actions (replaces the summary cards) ---------- */
+  .mgmt-bar{display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:18px;}
+  .btn-primary{
+    background:linear-gradient(135deg, var(--brand), #3a6fd6); border:1px solid #3a6fd6; color:#fff;
+    padding:10px 18px; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer;
+    display:inline-flex; align-items:center; gap:8px;
+  }
+  .btn-primary:hover{filter:brightness(1.08);}
+  .btn-secondary{
+    background:var(--bg-2); border:1px solid var(--border); color:var(--text-hi);
+    padding:10px 18px; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer;
+    display:inline-flex; align-items:center; gap:8px;
+  }
+  .btn-secondary:hover{background:var(--bg-3);}
+  .mgmt-note{color:var(--text-low); font-size:11.5px; margin-left:auto;}
+
+  /* ---------- Modals ---------- */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; z-index:100; background:rgba(6,9,14,.65); backdrop-filter:blur(2px);
+    align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-overlay.show{display:flex;}
+  .modal{
+    position:relative; width:100%; max-width:440px; background:linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    border:1px solid var(--border); border-radius:var(--radius); padding:22px; box-shadow:0 20px 60px rgba(0,0,0,.5);
+    max-height:90vh; overflow-y:auto;
+  }
+  .modal-close-btn{
+    position:absolute; top:14px; right:14px; width:28px; height:28px; border-radius:8px;
+    background:var(--bg-2); border:1px solid var(--border); color:var(--text-mid);
+    font-size:16px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+  .modal-close-btn:hover{background:var(--bg-3); color:var(--text-hi);}
+  .modal h3{margin:0 4px 4px 0; font-size:16px; padding-right:26px;}
+  .modal .modal-sub{color:var(--text-mid); font-size:11.5px; margin:0 0 18px;}
+  .modal .field{margin-bottom:14px;}
+  .modal label{display:block; font-size:11.5px; color:var(--text-mid); margin-bottom:6px; font-weight:600;}
+  .modal input[type=text], .modal input[type=number], .modal select{
+    width:100%; background:var(--bg-1); border:1px solid var(--border); color:var(--text-hi);
+    padding:9px 12px; border-radius:8px; font-size:13px;
+  }
+  .modal input[readonly]{color:var(--text-mid); background:var(--bg-2); cursor:not-allowed;}
+  .modal .modal-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:20px;}
+  .modal .modal-msg{font-size:12px; margin-top:10px; display:none; padding:8px 12px; border-radius:8px;}
+  .modal .modal-msg.err{display:block; background:var(--red-soft); color:var(--red);}
+  .modal .modal-msg.ok{display:block; background:var(--green-soft); color:var(--green);}
+  .modal .current-values{font-size:11.5px; color:var(--text-low); margin:-6px 0 14px;}
+  .modal .field-hint{font-size:10.5px; color:var(--text-low); margin-top:5px;}
+
+  /* Save-confirmation toast (D-008): fires after Add/Update succeeds and
+     the modal has already closed, so there's still a clear, visible
+     "this completed" signal even though the inline modal-msg.ok text is
+     gone the instant the modal closes. */
+  .toast{
+    position:fixed; bottom:24px; right:24px; z-index:200; display:flex; align-items:center; gap:8px;
+    background:var(--green-soft); border:1px solid #1d4a37; color:var(--green); font-size:12.5px; font-weight:600;
+    padding:12px 18px; border-radius:9px; box-shadow:0 12px 30px rgba(0,0,0,.35);
+    opacity:0; transform:translateY(8px); pointer-events:none; transition:opacity .15s ease, transform .15s ease;
+  }
+  .toast.show{opacity:1; transform:translateY(0);}
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">&#128230;</div>
+      <div class="brand-text">
+        <div class="title">OMS-360 Enterprise Inventory Center</div>
+        <div class="subtitle">Menu &amp; stock levels, live from production data</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div class="nav-switch">
+        <a href="/dashboard/operations">Operations</a>
+        <a href="/dashboard/monitoring">Monitoring</a>
+        <a class="active" href="/dashboard/inventory">Inventory</a>
+        <a href="/dashboard/ai-copilot">AI Copilot</a>
+      </div>
+      <div class="live-pill"><span class="live-dot"></span> LIVE</div>
+      <div class="clock" id="clock">--</div>
+    </div>
+  </div>
+
+  <div class="page">
+
+    <div class="conn-banner" id="connBanner">
+      &#9888; Could not reach the OMS-360 API. Showing the last data received. Retrying automatically&hellip;
+    </div>
+
+    <!-- Save-confirmation toast (D-008): shown after Add/Update succeeds. -->
+    <div class="toast" id="successToast"></div>
+
+    <!-- Inventory Management actions -->
+    <div class="section-title">
+      <h2><span class="icon-chip" style="background:var(--brand-soft);color:var(--brand);">&#9881;&#65039;</span> Inventory Management</h2>
+    </div>
+    <div class="panel">
+      <div class="mgmt-bar">
+        <button class="btn-primary" id="openUpdateBtn">&#9998; Update Inventory</button>
+        <button class="btn-primary" id="openAddBtn">&#43; Add New Item</button>
+        <button class="btn-secondary" id="mgmtRefreshBtn">&#8635; Refresh</button>
+        <span class="mgmt-note">Changes save straight to the database and appear here, on the Dashboard, and in AI Copilot immediately.</span>
+      </div>
+    </div>
+
+    <!-- Inventory Table -->
+    <div class="section-title">
+      <h2><span class="icon-chip" style="background:var(--amber-soft);color:var(--amber);">&#127859;</span> Menu &amp; Inventory
+        <span class="badge" id="itemsCount">0 items</span></h2>
+    </div>
+    <div class="panel">
+      <div class="controls-bar">
+        <input type="text" id="searchBox" placeholder="Search by Item ID or Item Name&hellip;">
+        <select id="statusFilter">
+          <option value="">All Statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="LOW_STOCK">Low Stock</option>
+          <option value="OUT_OF_STOCK">Out of Stock</option>
+        </select>
+        <select id="sortSelect">
+          <option value="item_id">Sort: Item ID</option>
+          <option value="stock_asc">Sort: Remaining Stock (Low &rarr; High)</option>
+          <option value="stock_desc">Sort: Remaining Stock (High &rarr; Low)</option>
+        </select>
+        <label class="chk"><input type="checkbox" id="autoRefreshToggle" checked> Auto Refresh (6s)</label>
+        <div class="spacer"></div>
+        <button class="btn" id="refreshNowBtn">Refresh Now</button>
+        <span class="last-updated" id="lastUpdated">Last updated: --</span>
+      </div>
+      <div class="table-wrap scrollbox">
+        <table>
+          <thead>
+            <tr>
+              <th>Item ID</th><th>Item Name</th><th>Price</th><th>Total Stock</th>
+              <th class="sortable" id="thRemaining">Remaining Stock <span class="sort-arrow" id="sortArrow"></span></th>
+              <th>Used Stock</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="inventoryBody">
+            <tr class="empty-row"><td colspan="7">Loading inventory&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="refresh-note">Auto-refreshes every 6s &middot; source: GET /api/v1/inventory &middot; same rows order creation reserves stock against</div>
+    </div>
+
+    <div style="height:24px;"></div>
+  </div>
+
+  <!-- Update Inventory modal -->
+  <div class="modal-overlay" id="updateModal">
+    <div class="modal">
+      <button class="modal-close-btn" id="updCloseBtn" type="button" aria-label="Close">&times;</button>
+      <h3>Update Inventory</h3>
+      <p class="modal-sub">Pick an item, then update its Name, Category, Unit, Stock, Price, and/or Status.</p>
+      <div class="field">
+        <label for="updItemSelect">Item Number (read-only)</label>
+        <select id="updItemSelect"></select>
+      </div>
+      <div class="current-values" id="updCurrentValues"></div>
+      <div class="field">
+        <label for="updItemName">Item Name</label>
+        <input type="text" id="updItemName" placeholder="Item name">
+      </div>
+      <div class="field">
+        <label for="updCategory">Category</label>
+        <input type="text" id="updCategory" placeholder="e.g. Beverages, Main Course, Dessert">
+      </div>
+      <div class="field">
+        <label for="updUnit">Unit</label>
+        <input type="text" id="updUnit" placeholder="e.g. plate, kg, pcs">
+      </div>
+      <div class="field">
+        <label for="updStock">Stock (remaining)</label>
+        <input type="number" id="updStock" min="0" step="1" placeholder="Leave blank to keep unchanged">
+      </div>
+      <div class="field">
+        <label for="updPrice">Price (&#8377;)</label>
+        <input type="number" id="updPrice" min="0.01" step="0.01" placeholder="Leave blank to keep unchanged">
+      </div>
+      <div class="field">
+        <label for="updStatus">Status</label>
+        <select id="updStatus">
+          <option value="">Auto (recalculate from stock)</option>
+          <option value="ACTIVE">Active</option>
+          <option value="LOW_STOCK">Low Stock</option>
+          <option value="OUT_OF_STOCK">Out of Stock</option>
+          <option value="INACTIVE">Inactive</option>
+        </select>
+      </div>
+      <div class="modal-msg" id="updMsg"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="updCancelBtn">Cancel</button>
+        <button class="btn-primary" id="updSaveBtn">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add New Item modal -->
+  <div class="modal-overlay" id="addModal">
+    <div class="modal">
+      <button class="modal-close-btn" id="addCloseBtn" type="button" aria-label="Close">&times;</button>
+      <h3>Add New Item</h3>
+      <p class="modal-sub">The Item Number is generated automatically on save.</p>
+      <div class="field">
+        <label for="addName">Item Name</label>
+        <input type="text" id="addName" placeholder="e.g. Paneer Tikka Wrap">
+      </div>
+      <div class="field">
+        <label for="addPrice">Price (&#8377;)</label>
+        <input type="number" id="addPrice" min="0.01" step="0.01" placeholder="e.g. 189.00">
+      </div>
+      <div class="field">
+        <label for="addStock">Starting Stock</label>
+        <input type="number" id="addStock" min="0" step="1" placeholder="e.g. 100">
+      </div>
+      <div class="field">
+        <label for="addStatus">Status</label>
+        <select id="addStatus">
+          <option value="ACTIVE">Active</option>
+          <option value="INACTIVE">Inactive</option>
+        </select>
+      </div>
+      <div class="modal-msg" id="addMsg"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="addCancelBtn">Cancel</button>
+        <button class="btn-primary" id="addSaveBtn">Create Item</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const REFRESH_MS = 6000;
+  const money = (n) => '₹' + Number(n||0).toLocaleString('en-IN', {maximumFractionDigits:0});
+  const esc = (s) => (s===null||s===undefined) ? '' : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function setClock(){
+    document.getElementById('clock').textContent = new Date().toLocaleString('en-IN', {weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+  setInterval(setClock, 1000); setClock();
+
+  async function fetchJSON(url){
+    const res = await fetch(url, {cache:'no-store'});
+    if(!res.ok) throw new Error(url + ' -> ' + res.status);
+    return res.json();
+  }
+
+  function showConnError(show){
+    document.getElementById('connBanner').classList.toggle('show', show);
+  }
+
+  // D-008: brief success toast, fired after Add/Update completes and the
+  // table has already been refreshed - gives a clear "this finished" signal
+  // even though the modal is already closed and its inline message is gone.
+  let toastHideTimer = null;
+  function showToast(message){
+    const el = document.getElementById('successToast');
+    el.textContent = message;
+    el.classList.add('show');
+    if(toastHideTimer) clearTimeout(toastHideTimer);
+    toastHideTimer = setTimeout(() => { el.classList.remove('show'); }, 4000);
+  }
+
+  const STATUS_DOT = {ACTIVE: '&#128994;', LOW_STOCK: '&#128993;', OUT_OF_STOCK: '&#128308;'};
+  const STATUS_COLOR = {ACTIVE: 'var(--green)', LOW_STOCK: 'var(--amber)', OUT_OF_STOCK: 'var(--red)'};
+
+  let allItems = [];       // full list, most recent fetch
+  let sortDir = null;      // 'asc' | 'desc' | null (via header click; overrides the select if set)
+
+  function applyFiltersAndRender(){
+    const q = (document.getElementById('searchBox').value || '').trim().toLowerCase();
+    const statusVal = document.getElementById('statusFilter').value;
+    const sortVal = document.getElementById('sortSelect').value;
+
+    let items = allItems.slice();
+
+    if(q){
+      items = items.filter(i =>
+        String(i.item_id||'').toLowerCase().includes(q) ||
+        String(i.item_name||'').toLowerCase().includes(q)
+      );
+    }
+    if(statusVal){
+      items = items.filter(i => i.status === statusVal);
+    }
+
+    const effectiveSort = sortDir ? ('stock_' + sortDir) : sortVal;
+    if(effectiveSort === 'stock_asc'){
+      items.sort((a,b) => a.remaining_stock - b.remaining_stock);
+    } else if(effectiveSort === 'stock_desc'){
+      items.sort((a,b) => b.remaining_stock - a.remaining_stock);
+    } else {
+      items.sort((a,b) => String(a.item_id).localeCompare(String(b.item_id)));
+    }
+
+    document.getElementById('sortArrow').textContent = effectiveSort === 'stock_asc' ? '↑' : (effectiveSort === 'stock_desc' ? '↓' : '');
+
+    renderTable(items);
+  }
+
+  function renderTable(items){
+    const body = document.getElementById('inventoryBody');
+    document.getElementById('itemsCount').textContent = items.length + ' items';
+    if(!items.length){
+      body.innerHTML = '<tr class="empty-row"><td colspan="7">No inventory items match your search/filter.</td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(i => {
+      const pct = i.total_stock > 0 ? Math.max(0, Math.min(100, Math.round((i.remaining_stock / i.total_stock) * 100))) : 0;
+      const color = STATUS_COLOR[i.status] || 'var(--text-low)';
+      return `
+      <tr>
+        <td class="mono">${esc(i.item_id)}</td>
+        <td>${esc(i.item_name)}</td>
+        <td class="mono">${money(i.price)}</td>
+        <td class="mono">${i.total_stock}</td>
+        <td class="mono">${i.remaining_stock}<span class="stock-bar-track"><span class="stock-bar-fill" style="width:${pct}%; background:${color};"></span></span></td>
+        <td class="mono">${i.used_stock}</td>
+        <td><span class="status-chip st-${esc(i.status)}">${STATUS_DOT[i.status] || ''} ${esc(i.status)}</span></td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function refreshAll(){
+    try{
+      allItems = await fetchJSON('/api/v1/inventory');
+      applyFiltersAndRender();
+      // isBackgroundRefresh=true: this runs every 6s on a timer, including
+      // while the Update Inventory modal is open and the user may be
+      // mid-edit. It must NOT overwrite what they're typing - see
+      // populateItemDropdown()'s comment below (this is the fix for the
+      // "typing disappears" bug).
+      populateItemDropdown(true);
+      document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date().toLocaleTimeString('en-IN');
+      showConnError(false);
+    }catch(err){
+      console.error('Inventory dashboard refresh failed:', err);
+      showConnError(true);
+    }
+  }
+
+  document.getElementById('searchBox').addEventListener('input', applyFiltersAndRender);
+  document.getElementById('statusFilter').addEventListener('change', applyFiltersAndRender);
+  document.getElementById('sortSelect').addEventListener('change', () => { sortDir = null; applyFiltersAndRender(); });
+  document.getElementById('thRemaining').addEventListener('click', () => {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    applyFiltersAndRender();
+  });
+  document.getElementById('refreshNowBtn').addEventListener('click', refreshAll);
+  document.getElementById('mgmtRefreshBtn').addEventListener('click', refreshAll);
+
+  let autoRefreshTimer = null;
+  function setAutoRefresh(on){
+    if(autoRefreshTimer){ clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    if(on){ autoRefreshTimer = setInterval(refreshAll, REFRESH_MS); }
+  }
+  document.getElementById('autoRefreshToggle').addEventListener('change', (e) => setAutoRefresh(e.target.checked));
+
+  /* ---------- Update Inventory modal ---------- */
+  const updateModal = document.getElementById('updateModal');
+  const updItemSelect = document.getElementById('updItemSelect');
+  const updCurrentValues = document.getElementById('updCurrentValues');
+  const updItemName = document.getElementById('updItemName');
+  const updCategory = document.getElementById('updCategory');
+  const updUnit = document.getElementById('updUnit');
+  const updStock = document.getElementById('updStock');
+  const updPrice = document.getElementById('updPrice');
+  const updStatus = document.getElementById('updStatus');
+  const updMsg = document.getElementById('updMsg');
+
+  // BUG FIX (2026-07-27): populateItemDropdown() used to unconditionally
+  // call showSelectedItemCurrentValues(), which blanks every editable
+  // field. It was being called from refreshAll() on every 6s auto-refresh
+  // tick - so if the Update Inventory dialog was open and you were
+  // mid-typing a new Stock/Price/Item Name/Category/Unit value, the
+  // background refresh would silently wipe it out a few seconds later
+  // ("when I try to type it's disappearing"). Fix: the dropdown's
+  // <option> list still gets rebuilt every refresh (so it stays current
+  // if items were added/renamed elsewhere), but the actual input fields
+  // are only reset when the modal is freshly opened or the user
+  // explicitly picks a different item from the dropdown - never as a
+  // side effect of the background timer.
+  function populateItemDropdown(isBackgroundRefresh){
+    const previouslySelected = updItemSelect.value;
+    const items = allItems.slice().sort((a,b) => String(a.item_id).localeCompare(String(b.item_id)));
+    updItemSelect.innerHTML = items.map(i => `<option value="${esc(i.item_id)}">${esc(i.item_id)} — ${esc(i.item_name)}</option>`).join('');
+    if(previouslySelected && items.some(i => i.item_id === previouslySelected)){
+      updItemSelect.value = previouslySelected;
+    }
+    if(isBackgroundRefresh){
+      refreshCurrentValuesLabel();
+    } else {
+      showSelectedItemCurrentValues();
+    }
+  }
+
+  // Refreshes only the read-only "Current: ..." reference line - never
+  // touches the editable inputs. Safe to call on every background tick.
+  function refreshCurrentValuesLabel(){
+    const item = allItems.find(i => i.item_id === updItemSelect.value);
+    if(!item){ return; }
+    updCurrentValues.textContent = `Current: ${money(item.price)} · ${item.remaining_stock} in stock · ${item.status}`;
+  }
+
+  // Full reset: called only on an explicit user action (opening the
+  // dialog fresh, or picking a different item from the dropdown) - never
+  // from the background auto-refresh. Item Name/Category/Unit are
+  // auto-populated with the item's current values (editable in place);
+  // Stock/Price/Status keep their existing "leave blank to keep
+  // unchanged" convention from the original design.
+  function showSelectedItemCurrentValues(){
+    const item = allItems.find(i => i.item_id === updItemSelect.value);
+    if(!item){
+      updCurrentValues.textContent = '';
+      updItemName.value = ''; updCategory.value = ''; updUnit.value = '';
+      updStock.value = ''; updPrice.value = ''; updStatus.value = '';
+      return;
+    }
+    updCurrentValues.textContent = `Current: ${money(item.price)} · ${item.remaining_stock} in stock · ${item.status}`;
+    updItemName.value = item.item_name || '';
+    updCategory.value = item.category || '';
+    updUnit.value = item.unit || '';
+    updStock.value = '';
+    updPrice.value = '';
+    updStatus.value = '';
+  }
+
+  function openUpdateModal(){
+    updMsg.className = 'modal-msg';
+    updMsg.textContent = '';
+    populateItemDropdown(false);
+    updateModal.classList.add('show');
+  }
+  function closeUpdateModal(){ updateModal.classList.remove('show'); }
+
+  document.getElementById('openUpdateBtn').addEventListener('click', openUpdateModal);
+  document.getElementById('updCancelBtn').addEventListener('click', closeUpdateModal);
+  document.getElementById('updCloseBtn').addEventListener('click', closeUpdateModal);
+  updateModal.addEventListener('click', (e) => { if(e.target === updateModal) closeUpdateModal(); });
+  updItemSelect.addEventListener('change', showSelectedItemCurrentValues);
+
+  // BUG FIX (2026-07-27, Defect 1/3): the Save button had no submit guard,
+  // so a fast double-click (or a click while the request was still in
+  // flight) fired two overlapping PUT requests, and a successful save left
+  // the modal open with no field reset - inviting a second, duplicate
+  // submission. updSaveBtn is now disabled for the duration of the request
+  // (re-enabled in `finally` so a failed request can be retried), and a
+  // successful save now closes the modal (returns to the inventory list)
+  // instead of leaving it open.
+  const updSaveBtn = document.getElementById('updSaveBtn');
+  let updSubmitting = false;
+
+  updSaveBtn.addEventListener('click', async () => {
+    if(updSubmitting) return;
+    const itemId = updItemSelect.value;
+    if(!itemId){ return; }
+    const payload = {};
+    const nameVal = updItemName.value.trim();
+    const categoryVal = updCategory.value.trim();
+    const unitVal = updUnit.value.trim();
+    if(nameVal) payload.item_name = nameVal;
+    if(categoryVal) payload.category = categoryVal;
+    if(unitVal) payload.unit = unitVal;
+    if(updStock.value !== '') payload.stock = parseInt(updStock.value, 10);
+    if(updPrice.value !== '') payload.price = parseFloat(updPrice.value);
+    if(updStatus.value !== '') payload.status = updStatus.value;
+    if(Object.keys(payload).length === 0){
+      updMsg.className = 'modal-msg err';
+      updMsg.textContent = 'Change at least one field before saving.';
+      return;
+    }
+    updSubmitting = true;
+    updSaveBtn.disabled = true;
+    try{
+      const res = await fetch(`/api/v1/inventory/${encodeURIComponent(itemId)}`, {
+        method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+      });
+      const body = await res.json();
+      if(!res.ok){
+        updMsg.className = 'modal-msg err';
+        updMsg.textContent = body.detail || `Update failed (${res.status}).`;
+        return;
+      }
+      await refreshAll();
+      closeUpdateModal();
+      // D-008: the modal's inline "saved" message disappears the instant
+      // the modal closes, leaving no visible confirmation that the update
+      // completed. This toast fires after refreshAll() has already
+      // repainted the table, so it doubles as the "this is done, and the
+      // list you're looking at is current" signal.
+      showToast(`${body.item_id} updated — now ${body.item_name}, ${body.remaining_stock} in stock, ${body.status}.`);
+    }catch(err){
+      updMsg.className = 'modal-msg err';
+      updMsg.textContent = 'Could not reach the OMS-360 API. Please try again.';
+    }finally{
+      updSubmitting = false;
+      updSaveBtn.disabled = false;
+    }
+  });
+
+  /* ---------- Add New Item modal ---------- */
+  const addModal = document.getElementById('addModal');
+  const addName = document.getElementById('addName');
+  const addPrice = document.getElementById('addPrice');
+  const addStock = document.getElementById('addStock');
+  const addStatus = document.getElementById('addStatus');
+  const addMsg = document.getElementById('addMsg');
+
+  function openAddModal(){
+    addName.value = ''; addPrice.value = ''; addStock.value = ''; addStatus.value = 'ACTIVE';
+    addMsg.className = 'modal-msg';
+    addMsg.textContent = '';
+    addModal.classList.add('show');
+  }
+  function closeAddModal(){ addModal.classList.remove('show'); }
+
+  document.getElementById('openAddBtn').addEventListener('click', openAddModal);
+  document.getElementById('addCancelBtn').addEventListener('click', closeAddModal);
+  document.getElementById('addCloseBtn').addEventListener('click', closeAddModal);
+  addModal.addEventListener('click', (e) => { if(e.target === addModal) closeAddModal(); });
+
+  // Escape closes whichever modal is currently open - the modal must never
+  // trap the user, so this is a third way out alongside the X button and
+  // the existing Cancel button / click-outside-to-close.
+  document.addEventListener('keydown', (e) => {
+    if(e.key !== 'Escape') return;
+    if(updateModal.classList.contains('show')) closeUpdateModal();
+    if(addModal.classList.contains('show')) closeAddModal();
+  });
+
+  // BUG FIX (2026-07-27, Defect 1/3 - same root cause as Update above):
+  // no submit guard meant a double-click on "Create Item" fired two POSTs
+  // before the first one's response ever came back, creating two rows for
+  // the same item (see DECISION-LOG: ITEM-1002/1003 "cold coffee",
+  // ITEM-1004/1005 "curd rice"). addSaveBtn is now disabled for the
+  // duration of the request, and a successful create closes the modal
+  // (returns to the inventory list) instead of leaving the same
+  // name/price/stock sitting in the form inviting a second submission.
+  const addSaveBtn = document.getElementById('addSaveBtn');
+  let addSubmitting = false;
+
+  addSaveBtn.addEventListener('click', async () => {
+    if(addSubmitting) return;
+    const name = addName.value.trim();
+    const price = parseFloat(addPrice.value);
+    const stock = parseInt(addStock.value, 10);
+    if(!name || !(price > 0) || !(stock >= 0)){
+      addMsg.className = 'modal-msg err';
+      addMsg.textContent = 'Enter an item name, a price greater than 0, and a starting stock of 0 or more.';
+      return;
+    }
+    addSubmitting = true;
+    addSaveBtn.disabled = true;
+    try{
+      const res = await fetch('/api/v1/inventory', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({item_name: name, price, total_stock: stock, status: addStatus.value}),
+      });
+      const body = await res.json();
+      if(!res.ok){
+        addMsg.className = 'modal-msg err';
+        addMsg.textContent = body.detail || `Create failed (${res.status}).`;
+        return;
+      }
+      await refreshAll();
+      closeAddModal();
+      // D-008: same confirmation gap as Update (see above) - fires after
+      // the table already shows the new row.
+      showToast(`Created ${body.item_id} — ${body.item_name}.`);
+    }catch(err){
+      addMsg.className = 'modal-msg err';
+      addMsg.textContent = 'Could not reach the OMS-360 API. Please try again.';
+    }finally{
+      addSubmitting = false;
+      addSaveBtn.disabled = false;
+    }
+  });
+
+  refreshAll();
+  setAutoRefresh(true);
+</script>
+</body>
+</html>

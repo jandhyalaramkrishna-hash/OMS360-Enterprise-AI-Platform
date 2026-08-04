@@ -1,0 +1,201 @@
+version: '3.8'
+
+# ============================================================================
+# OMS-360 Enterprise Order Management System - Version 1.0
+# Multi-Container Local Runtime Orchestration Topology
+#
+# Fixed vs. the version you uploaded (documented, not silent):
+#   - Added a `mysql` service. The old file had none - `oms360-engine` had
+#     nothing to actually connect to inside the Docker network.
+#   - `oms360-engine` now uses OMS360_DB_HOST=mysql and
+#     KAFKA_BOOTSTRAP_SERVERS=kafka:29092 (the internal listener) - service
+#     names, not `localhost`, for container-to-container communication.
+#     Inside a container, `localhost` means the container itself.
+#   - Added an `oms360-consumer` service running the same image, so the
+#     Kafka consumer (app/messaging/consumer.py) actually runs somewhere -
+#     it wasn't started by anything in the old setup.
+#
+# 2026-07-22 audit fix (see docs/governance/DECISION-LOG.md):
+#   - The mysql init-script bind mount pointed at `./oms360_schema.sql`,
+#     which does not exist at the repo root (the real file is
+#     `database/oms360_schema.sql`). Because the host path didn't exist,
+#     Docker silently created an EMPTY DIRECTORY there and bind-mounted
+#     that instead - MySQL's entrypoint skips non-file entries under
+#     /docker-entrypoint-initdb.d, so the master schema was never actually
+#     applied on first boot. This is why the database had no tables and
+#     the UI/API showed no live data. Fixed to point at the real path.
+#     If you already have a `oms360_mysql_data` volume from a prior broken
+#     run, it was initialized with zero tables - run
+#     `docker compose down -v` once to wipe it so this fix can actually
+#     apply the schema on the next `up` (see the verification steps you
+#     were given separately).
+#   - Kafka had no healthcheck and every depends_on used the simple list
+#     form, which only waits for a container to *exist*, not to be ready.
+#     Added a Kafka healthcheck and switched every depends_on to
+#     `condition: service_healthy` so mysql/zookeeper/kafka are actually
+#     healthy before kafka/engine/consumer start.
+#   - Bumped confluentinc/cp-zookeeper and cp-kafka from 7.3.0 to 7.6.1 -
+#     7.3.0's bundled JDK has a known cgroup v2 probing crash
+#     (NullPointerException in jdk.internal.platform.cgroupv2...) on
+#     current Docker Desktop/WSL2. KAFKA_OPTS=-XX:-UseContainerSupport
+#     (already present below) is kept as defense-in-depth on top of this.
+#   - Declared a fixed `oms360_network` instead of leaving Compose to
+#     auto-name the network from the folder name, matching what
+#     scripts/common.bat and docker/docker-compose.app.yml already assume.
+#
+# 2026-07-22 audit fix #2 (see docs/governance/DECISION-LOG.md, DEC-0030):
+#   - database/demo_seed.sql (menu/inventory items + demo orders) was never
+#     mounted as an init script, only oms360_schema.sql + the two
+#     migrations were. A freshly-initialized database therefore had zero
+#     rows in `inventory`/`items` - no product existed to order, so every
+#     POST /api/v1/orders would eventually fail (UnknownItemException) once
+#     a valid item_id was actually reached. Added as 04_demo_seed.sql so a
+#     fresh volume is always immediately order-ready, matching this file's
+#     own stated purpose ("so every dashboard card/table has something
+#     real to show without waiting for live traffic"). demo_reset.sql is
+#     intentionally NOT mounted here - it's a manual re-seed tool for
+#     wiping demo rows without a full volume reset, not an init step.
+#
+# 2026-07-27 addition (see docs/governance/DECISION-LOG.md):
+#   - Added migrations/004_add_item_category_unit.sql as
+#     05_item_category_unit.sql (Product Owner request: Category/Unit
+#     editable on Inventory Dashboard's "Update Inventory" dialog). Purely
+#     additive - one new mounted file, nothing above it changed. Only
+#     applies automatically to a BRAND-NEW database volume; an existing
+#     volume (this project already has live order/inventory data) needs
+#     the migration applied manually once - see the file's own header for
+#     the exact command.
+# ============================================================================
+
+services:
+  # 1. Relational database
+  mysql:
+    image: mysql:8.0
+    container_name: oms360_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: oms360_db
+    ports:
+      - "3306:3306"
+    volumes:
+      - oms360_mysql_data:/var/lib/mysql
+      # Applies the master schema automatically on first container start.
+      # Add migrations/002_add_audit_trail.sql here too if you want the
+      # audit trail table created automatically as well.
+      - ./database/oms360_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./migrations/002_add_audit_trail.sql:/docker-entrypoint-initdb.d/02_audit_trail.sql:ro
+      - ./migrations/003_add_inventory_ledger.sql:/docker-entrypoint-initdb.d/03_inventory_ledger.sql:ro
+      - ./database/demo_seed.sql:/docker-entrypoint-initdb.d/04_demo_seed.sql:ro
+      - ./migrations/004_add_item_category_unit.sql:/docker-entrypoint-initdb.d/05_item_category_unit.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - oms360_network
+
+  # 2. Message Queue Coordinator (Zookeeper)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: oms360_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_OPTS: "-XX:-UseContainerSupport"
+      ZOOKEEPER_4LW_COMMANDS_WHITELIST: "ruok"
+    healthcheck:
+      test: ["CMD-SHELL", "echo srvr | nc -w 2 localhost 2181 | grep Mode"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "2181:2181"
+    networks:
+      - oms360_network
+
+  # 3. Event Streaming Broker (Apache Kafka)
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: oms360_kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_OPTS: "-XX:-UseContainerSupport"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - oms360_network
+
+  # 4. Core FastAPI application (app/main.py - the one authoritative API)
+  oms360-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oms360_core_engine
+    ports:
+      - "8000:8000"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    environment:
+      - OMS360_DB_HOST=mysql
+      - OMS360_DB_USER=root
+      - OMS360_DB_PASSWORD=root123
+      - OMS360_DB_NAME=oms360_db
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - OMS360_DOCKER_MODE=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - oms360_network
+
+  # 5. Kafka consumer (app/messaging/consumer.py) - same image, different
+  # entrypoint. Nothing ran this in the original compose file.
+  oms360-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oms360_consumer
+    command: ["python", "-m", "app.messaging.consumer"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    environment:
+      - OMS360_DB_HOST=mysql
+      - OMS360_DB_USER=root
+      - OMS360_DB_PASSWORD=root123
+      - OMS360_DB_NAME=oms360_db
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - OMS360_DOCKER_MODE=true
+    networks:
+      - oms360_network
+
+networks:
+  oms360_network:
+    driver: bridge
+    name: oms360_network
+
+volumes:
+  oms360_mysql_data:
