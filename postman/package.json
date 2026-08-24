@@ -1,0 +1,16 @@
+{
+  "name": "oms360-qa-newman",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Newman/Postman regression suite for the OMS-360 Enterprise Food Delivery Platform QA infrastructure. Reports: CLI, JSON, HTML Extra, JUnit XML, and Allure raw results (merged with pytest's into the repo-root allure-results/ for one unified Enterprise Allure report).",
+  "scripts": {
+    "test": "run-newman.bat",
+    "test:cli": "newman run collection/OMS360.postman_collection.json -e environment/OMS360.postman_environment.json --reporters cli",
+    "test:full": "newman run collection/OMS360.postman_collection.json -e environment/OMS360.postman_environment.json --reporters cli,json,htmlextra,junit,allure --reporter-json-export reports/newman-json-report.json --reporter-htmlextra-export reports/newman-html-report.html --reporter-junit-export reports/newman-junit-report.xml --reporter-allure-resultsDir ../allure-results"
+  },
+  "devDependencies": {
+    "newman": "^6.2.1",
+    "newman-reporter-htmlextra": "^1.23.1",
+    "newman-reporter-allure": "^1.1.0"
+  }
+}

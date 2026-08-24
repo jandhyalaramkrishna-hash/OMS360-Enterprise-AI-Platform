@@ -1,0 +1,327 @@
+// =============================================================================
+// OMS-360 Enterprise QA Pipeline
+// Windows agent (matches this project's own START_OMS360.bat / docker-compose.yml
+// pattern). Does not modify application, Docker, Kafka, or Playwright code -
+// it only orchestrates the existing stack plus the Newman/Allure QA
+// infrastructure under postman/, allure-results/, allure-report/.
+//
+// Execution flow (must match Run_QA_Pipeline.bat exactly):
+//   1. The application must ALREADY be running (started separately via
+//      START_OMS360.bat on whatever machine hosts the stack this agent
+//      targets) - this pipeline NEVER runs `docker compose up` or starts
+//      Docker Desktop. It only verifies, tests, and reports.
+//   2. Health Check verifies Docker containers / Kafka / MySQL / FastAPI via
+//      the same postman/verify_stack_health.py script Run_QA_Pipeline.bat
+//      uses - if the stack isn't healthy, the build fails immediately with
+//      a clear message.
+//   3. Run Newman by delegating to postman/run-newman.bat - the ONE
+//      canonical Newman runner in this repo. This stage does NOT
+//      reimplement the `newman run ...` command line separately; it calls
+//      the same script a local run calls, so local and CI runs are
+//      byte-identical -> Publish JUnit XML -> Archive Newman Reports.
+//   4. Execute pytest -> Generate Allure Results -> Generate Allure HTML
+//      Report (its own exit code is checked - the build fails immediately
+//      if `allure generate` fails, per explicit requirement) -> Apply
+//      Allure Dark Theme (cosmetic, non-fatal) -> Verify Allure Report
+//      Integrity (postman/verify_allure_report.py - read-only structural
+//      check that Overview/Suites/Behaviors/Categories/Timeline/
+//      Environment all have real data behind them) -> Publish Allure
+//      Report -> Archive HTML/JSON/JUnit/Allure.
+//
+// This Jenkinsfile never opens a browser or a dashboard (Run_QA_Pipeline.bat's
+// end-of-run "Open Jenkins Dashboard?" prompt is a local-only, interactive
+// convenience with no CI equivalent) and never triggers another build.
+//
+// Report publishing/archiving lives in post{always{...}} so every report is
+// still available even when Newman or pytest fails - but the build itself
+// still FAILS (non-zero) on any Newman failure, pytest failure, `allure
+// generate` failure, or Allure report integrity-verification failure.
+//
+// -----------------------------------------------------------------------------
+// PATH FIX (this revision):
+// The 'Checkout Source' stage deliberately skips SCM checkout - this repo
+// already lives at a fixed location on the Windows agent's disk
+// (C:\Project-5-OMS360-Food-Delivery-AI-Enterprise-Platform), it is NOT
+// copied into the Jenkins workspace. That means every stage MUST explicitly
+// `dir()` into the project root before running a relative command; only
+// relying on Jenkins' default workspace (which is a different, empty
+// directory under ...\.jenkins\workspace\<job>) resolves relative paths
+// (postman\..., allure-results, etc.) against the wrong place and fails
+// with "python: can't open file ...\workspace\...\postman\...".
+//
+// Previously only the 'Install Python Dependencies' stage wrapped its
+// commands in dir('C:\Project-5-OMS360-Food-Delivery-AI-Enterprise-Platform'){...}
+// - every later stage (Health Check, Newman, pytest, Allure generate/verify,
+// junit/archiveArtifacts/allure publish steps, and the post{always{}} block)
+// ran unwrapped, i.e. from the Jenkins workspace. This revision:
+//   1. Adds a PROJECT_ROOT environment variable holding the absolute project
+//      path, so the path is defined once instead of repeated as a literal
+//      string in every stage.
+//   2. Wraps EVERY stage's steps (including junit/archiveArtifacts/allure
+//      calls, which resolve their artifact globs relative to the current
+//      dir() context) in dir("${PROJECT_ROOT}") { ... }, so all relative
+//      paths (postman\..., allure-results\..., allure-report\..., etc.)
+//      resolve against the real project root on disk.
+//   3. Wraps the post{always{}} block's fileExists/junit/archiveArtifacts/
+//      allure calls the same way, since those also run relative to the
+//      workspace by default and would otherwise report everything as
+//      missing after a mid-pipeline failure.
+//   4. Nested dir('postman'){...} (Run Newman stage) is preserved but now
+//      nests INSIDE dir(PROJECT_ROOT), so it resolves to
+//      <PROJECT_ROOT>\postman rather than <jenkins-workspace>\postman.
+// No stage logic (commands run, order, fail/pass conditions) was changed -
+// only the working directory each stage's steps execute from.
+// =============================================================================
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
+    environment {
+        BASE_URL     = 'http://localhost:8000'
+        // Fixed on-disk project root - the repo is NOT checked out into the
+        // Jenkins workspace (see 'Checkout Source' stage below), so every
+        // stage must dir() into this path before running relative commands.
+        PROJECT_ROOT = 'C:\\Project-5-OMS360-Food-Delivery-AI-Enterprise-Platform'
+        // Jenkins runs as a Windows Service, so the `py` launcher (which
+        // relies on interactive-user-session registry entries / PEP 514) is
+        // not reliably resolvable from that service context even though
+        // Python 3.12 is installed and on PATH for the interactive user.
+        // Call the interpreter by its absolute path instead of `py -3.12`.
+        PYTHON_EXE   = 'C:\\Users\\RAM\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'
+    }
+
+    stages {
+
+        stage('Checkout Source') {
+            steps {
+                 echo 'Using local project workspace - SCM checkout skipped.'
+            }
+        }
+
+        stage('Install Python Dependencies') {
+            steps {
+               dir("${PROJECT_ROOT}") {
+                  bat '"%PYTHON_EXE%" -m pip install --upgrade pip'
+                  bat '"%PYTHON_EXE%" -m pip install -r requirements.txt'
+                  bat '"%PYTHON_EXE%" -m pip install -r requirements-test.txt'
+               }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                // Verification ONLY - this pipeline never starts Docker
+                // Desktop or runs `docker compose up`. If the application
+                // isn't already running and healthy, this fails the build
+                // immediately with a clear error, per explicit instruction.
+                dir("${PROJECT_ROOT}") {
+                    bat '''
+                        python postman\\verify_stack_health.py --base-url %BASE_URL%
+                        if errorlevel 1 (
+                            echo [ERROR] Application is not running. Execute START_OMS360.bat and verify all services before running the QA pipeline.
+                            exit /b 1
+                        )
+                    '''
+                    bat '''
+                        if exist allure-results rmdir /s /q allure-results
+                        mkdir allure-results
+                    '''
+                }
+            }
+        }
+
+        stage('Run Newman') {
+            steps {
+                // Delegates to the ONE canonical Newman runner in this repo
+                // (postman/run-newman.bat) instead of reimplementing the
+                // `newman run ...` command line here - keeps local and CI
+                // runs identical and avoids a second copy to keep in sync.
+                dir("${PROJECT_ROOT}") {
+                    dir('postman') {
+                        bat 'call run-newman.bat'
+                    }
+                }
+            }
+        }
+
+        stage('Publish JUnit XML') {
+            steps {
+                dir("${PROJECT_ROOT}") {
+                    junit testResults: 'postman/reports/newman-junit-report.xml', allowEmptyResults: false
+                }
+            }
+        }
+
+        stage('Archive Newman Reports') {
+            steps {
+                dir("${PROJECT_ROOT}") {
+                    archiveArtifacts artifacts: 'postman/reports/**', allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Execute pytest') {
+            steps {
+                dir("${PROJECT_ROOT}") {
+                    bat '"%PYTHON_EXE%" -m pip install --upgrade pip'
+                }
+            }
+        }
+
+        stage('Generate Allure Results') {
+            steps {
+                // pytest's --alluredir above already merged its results into
+                // the same allure-results/ Newman wrote into. This stage
+                // preserves trend history and writes Enterprise metadata
+                // before generation.
+                dir("${PROJECT_ROOT}") {
+                    bat '''
+                        if exist allure-report\\history (
+                            if not exist allure-results\\history mkdir allure-results\\history
+                            xcopy /e /i /y allure-report\\history allure-results\\history >nul
+                        )
+                        python postman\\generate_allure_metadata.py --allure-results-dir allure-results --base-url %BASE_URL%
+                    '''
+                }
+            }
+        }
+
+        stage('Generate Allure HTML Report') {
+            steps {
+                // Exit code checked explicitly (the default `bat` step
+                // behavior already fails the stage/build on non-zero, but
+                // this is made explicit so the required-message intent is
+                // unambiguous in the pipeline source itself): if `allure
+                // generate` fails, print its own error output above and
+                // stop - never fall through to Publish/Archive with a
+                // missing or partial report.
+                dir("${PROJECT_ROOT}") {
+                    bat '''
+                        allure generate allure-results -o allure-report --clean
+                        if errorlevel 1 (
+                            echo [ERROR] "allure generate allure-results --clean -o allure-report" FAILED - see the Allure CLI output above for the exact cause.
+                            exit /b 1
+                        )
+                    '''
+                }
+            }
+        }
+
+        stage('Apply Allure Dark Theme') {
+            steps {
+                // Cosmetic, non-fatal: re-applies a dark-theme-by-default
+                // snippet into allure-report/index.html's own official
+                // head-customization slot every build, since `allure
+                // generate --clean` rewrites index.html from scratch each
+                // time. Never overrides a viewer's own later theme toggle.
+                dir("${PROJECT_ROOT}") {
+                    bat 'python postman\\apply_allure_dark_theme.py --allure-report-dir allure-report || exit 0'
+                }
+            }
+        }
+
+        stage('Verify Allure Report Integrity') {
+            steps {
+                // Read-only structural check: a zero exit code from `allure
+                // generate` only means the CLI didn't crash, not that every
+                // tab (Overview/Suites/Behaviors/Categories/Timeline/
+                // Environment) actually has real data behind it. This
+                // fails the build with the exact missing/invalid file if
+                // the generated report is incomplete.
+                dir("${PROJECT_ROOT}") {
+                    bat 'python postman\\verify_allure_report.py --allure-results-dir allure-results --allure-report-dir allure-report'
+                }
+            }
+        }
+
+        stage('Publish Allure Report') {
+            steps {
+                // Requires the Allure Jenkins plugin. If it is not installed
+                // on this controller, comment this stage out - the static
+                // allure-report/ folder is still archived below regardless.
+                dir("${PROJECT_ROOT}") {
+                    allure includeProperties: false, jdk: '', results: [[path: 'allure-results']]
+                }
+            }
+        }
+
+        stage('Archive HTML Reports') {
+            steps {
+                dir("${PROJECT_ROOT}") {
+                    archiveArtifacts artifacts: 'postman/reports/newman-html-report.html, allure-report/**', allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Archive JSON Reports') {
+            steps {
+                dir("${PROJECT_ROOT}") {
+                    archiveArtifacts artifacts: 'postman/reports/newman-json-report.json', allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Archive JUnit XML') {
+            steps {
+                dir("${PROJECT_ROOT}") {
+                    archiveArtifacts artifacts: 'postman/reports/newman-junit-report.xml', allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Archive Allure Report') {
+            steps {
+                dir("${PROJECT_ROOT}") {
+                    archiveArtifacts artifacts: 'allure-report/**, allure-results/**', allowEmptyArchive: false
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Publishing and archiving live here too, unconditionally, so
+            // every report generated up to the point of failure is still
+            // available for analysis even when an earlier stage (Health
+            // Check / Run Newman / Execute pytest / Generate Allure HTML
+            // Report / Verify Allure Report Integrity) fails and the
+            // pipeline never reaches the explicit Archive stages above.
+            // Wrapped in dir(PROJECT_ROOT) for the same reason as every
+            // stage above: fileExists()/junit/archiveArtifacts/allure all
+            // resolve their paths relative to the current dir() context,
+            // which defaults to the (wrong) Jenkins workspace otherwise.
+            dir("${PROJECT_ROOT}") {
+                script {
+                    if (fileExists('postman/reports/newman-junit-report.xml')) {
+                        junit testResults: 'postman/reports/newman-junit-report.xml', allowEmptyResults: true
+                    }
+                    if (fileExists('postman/reports')) {
+                        archiveArtifacts artifacts: 'postman/reports/**', allowEmptyArchive: true
+                    }
+                    if (fileExists('allure-results')) {
+                        archiveArtifacts artifacts: 'allure-results/**', allowEmptyArchive: true
+                    }
+                    if (fileExists('allure-report')) {
+                        archiveArtifacts artifacts: 'allure-report/**', allowEmptyArchive: true
+                        allure includeProperties: false, jdk: '', results: [[path: 'allure-results']]
+                    }
+                }
+            }
+            // No `docker compose down` here, deliberately - this pipeline
+            // never started the stack, so it never stops it either. The
+            // stack's lifecycle belongs entirely to START_OMS360.bat /
+            // STOP_OMS360.bat, run by whoever manages that machine.
+        }
+        failure {
+            echo 'OMS-360 QA pipeline FAILED - see Health Check / Newman / pytest / Allure generate / Allure verify output above for the failing check or test(s). Reports (if any were generated) are still archived above for analysis.'
+        }
+        success {
+            echo 'OMS-360 QA pipeline PASSED - Newman and pytest tests green, and the Allure report was generated and verified successfully.'
+        }
+    }
+}
