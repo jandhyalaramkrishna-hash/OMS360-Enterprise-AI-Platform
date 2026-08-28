@@ -60,6 +60,16 @@ class ApplicationSettings:
     SMS_PROVIDER: str = os.getenv("OMS360_SMS_PROVIDER", "")
     SMS_API_KEY: str = os.getenv("OMS360_SMS_API_KEY", "")
 
+    # 2026-08-28 addition: SMTP auth + the fixed alert recipient for the
+    # inventory low-stock ("Danger Level") email alert. Reuses the
+    # EMAIL_SMTP_HOST/PORT/FROM settings above and the existing
+    # notifications_enabled feature flag - notification_service.py is the
+    # only place these are read, and the alert is only ever raised from the
+    # existing inventory_service.py low-stock/out-of-stock path.
+    EMAIL_SMTP_USERNAME: str = os.getenv("OMS360_EMAIL_SMTP_USERNAME", "")
+    EMAIL_SMTP_PASSWORD: str = os.getenv("OMS360_EMAIL_SMTP_PASSWORD", "")
+    INVENTORY_ALERT_EMAIL: str = os.getenv("OMS360_INVENTORY_ALERT_EMAIL", "jandhyala.ramkrishna@gmail.com")
+
     # GPS / delivery tracking - placeholder for future live tracking (V2 roadmap)
     GPS_PROVIDER: str = os.getenv("OMS360_GPS_PROVIDER", "")
     GPS_API_KEY: str = os.getenv("OMS360_GPS_API_KEY", "")

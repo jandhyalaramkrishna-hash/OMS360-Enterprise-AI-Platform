@@ -14,9 +14,11 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from app import models
+from app.config import settings
 from app.core.enums import InventoryMovementType, InventoryStatus
 from app.core.exceptions import InventoryLockException, InventoryNotFoundException
 from app.core.logging_config import get_logger
+from app.services import notification_service
 
 logger = get_logger("oms360.services.inventory_service")
 
@@ -296,7 +298,7 @@ def _maybe_raise_alert(db: Session, stock_row: models.Inventory):
         return
 
     stock_row.status = status_value
-    db.add(models.InventoryAlert(
+    alert_row = models.InventoryAlert(
         item_id=stock_row.item_id,
         item_name=stock_row.item_name,
         remaining_stock=stock_row.remaining_stock,
@@ -304,9 +306,24 @@ def _maybe_raise_alert(db: Session, stock_row: models.Inventory):
         alert_type=alert_type,
         notification_type="EMAIL",
         notification_status="PENDING",
-    ))
+        recipient_email=settings.INVENTORY_ALERT_EMAIL,
+    )
+    db.add(alert_row)
     logger.warning(f"Inventory alert raised: {alert_type} for {stock_row.item_id} "
                     f"(remaining={stock_row.remaining_stock}, threshold={threshold})")
+
+    # 2026-08-28 addition: fire the existing notify_low_stock() stub for
+    # real now (see notification_service.py). Covers both LOW_STOCK and
+    # OUT_OF_STOCK - both are "danger level reached" for this alert row,
+    # which is exactly what notification_type=EMAIL/notification_status
+    # were already modeled for. Never raises - a send failure just leaves
+    # notification_status=FAILED on the alert row instead of blocking the
+    # surrounding stock reservation/adjustment.
+    sent = notification_service.notify_low_stock(
+        stock_row.item_id, stock_row.item_name, stock_row.remaining_stock,
+        recipient_email=settings.INVENTORY_ALERT_EMAIL,
+    )
+    alert_row.notification_status = "SENT" if sent else "FAILED"
 
 
 def _recompute_status_from_stock(db: Session, stock_row: models.Inventory):
