@@ -11,7 +11,7 @@ logs.
 
 All defects below are **CLOSED / FIXED**. None are currently open. New
 defects found in future test runs should be appended here using the same
-template, numbered sequentially from `DEF-006`.
+template, numbered sequentially from `DEF-007`.
 
 ---
 
@@ -199,3 +199,52 @@ direct `file://` open; `Generate_Allure_Report.bat` now checks
 if it fails, then runs `postman/verify_allure_report.py` integrity check
 before declaring success. Full detail:
 `docs/governance/QA_ALLURE_500_FIX_2026-08-04.md`.
+
+---
+
+## DEF-006
+
+**Reported by:** Project Owner (Ramakrishna Jandhyala), 2026-11-20
+**Related test case(s):** `tests/test_inventory_notifications.py` (33 tests), `tests/test_inventory.py`, LIT-NOTIF-001
+**Severity:** High — inventory alert emails not delivered
+
+### Summary
+Low-stock / out-of-stock inventory alert emails stopped arriving, and
+alerts recorded while notifications were off or SMTP was failing could
+never be delivered.
+
+### Root Cause
+Five code defects plus one deployment issue:
+1. Every not-sent outcome (including "feature disabled") was stored as
+   `FAILED`; no retry existed.
+2. Email was sent inside the open order transaction (rows locked
+   `FOR UPDATE`); a rolled-back transaction could already have emailed.
+3. Every reservation below the threshold created another alert row and
+   another email.
+4. No mechanism to deliver alerts left undelivered.
+5. Stray whitespace / CR in the SMTP password from a CRLF `.env`;
+   unclassified SMTP error logging.
+6. Deployment: `docker compose up -d --force-recreate` reused the old
+   image, so the container had neither the fixed code nor the new tests
+   (`pytest: file or directory not found`).
+
+### Steps to Reproduce
+Enable `OMS360_FEATURE_NOTIFICATIONS`, configure Gmail SMTP, place orders
+that take an item to or below `LOW_STOCK_THRESHOLD`.
+
+### Expected Result
+One alert email per low-stock / out-of-stock episode, delivered after the
+order commits; `inventory_alerts.notification_status` reflects the true
+outcome.
+
+### Actual Result
+No email received; alert rows left in an inaccurate state, with
+duplicates per order.
+
+### Status
+**FIXED / CLOSED — 2026-11-20.** PENDING/SENT/FAILED outcomes, post-commit
+dispatch, per-episode de-duplication, cooldown retry, new
+`POST /api/v1/inventory/alerts/dispatch-pending`, credential-safe logging.
+Images rebuilt. Verified: 41/41 automated tests passed; live Gmail
+delivery LIT-NOTIF-001 passed (alert 12 SENT, exactly one email). Full
+evidence: `docs/release/LOW_STOCK_EMAIL_CLOSURE_REPORT_2026-11-20.md`.

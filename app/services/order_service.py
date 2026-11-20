@@ -193,6 +193,11 @@ def _create_order_transaction(db: Session, payload: schemas.OrderCreatePayload,
     audit_service.record_event(db, order_id, transaction_id, AuditEventType.INVENTORY_RESERVED.value,
                                 details=f"{len(payload.items)} line item(s)")
 
+    # 2026-11-20: low-stock/out-of-stock alert emails raised by
+    # reserve_stock() are sent only now, after the order transaction has
+    # committed and its inventory row locks are released. Never raises.
+    inventory_service.dispatch_pending_notifications(db)
+
     return order
 
 

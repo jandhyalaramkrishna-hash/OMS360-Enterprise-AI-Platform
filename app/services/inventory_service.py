@@ -9,8 +9,11 @@ models.Inventory rows directly.
 """
 
 import re
+import threading
+import time
 from typing import List, Optional
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app import models
@@ -29,6 +32,21 @@ DEFAULT_LOW_STOCK_THRESHOLD = 10  # used if system_configuration has no override
 # pattern, so generated ids can never collide with the seeded catalog.
 _GENERATED_ITEM_ID_PATTERN = re.compile(r"^ITEM-(\d+)$")
 _GENERATED_ITEM_ID_START = 1000
+
+# 2026-11-20 (low-stock email fix): alert emails are no longer sent inside
+# the caller's open transaction. _maybe_raise_alert() queues the alert row
+# on the Session (db.info[...]); dispatch_pending_notifications() sends the
+# queued emails AFTER the caller has committed, so (a) SMTP latency never
+# runs while inventory rows are locked FOR UPDATE, and (b) a transaction
+# that rolls back can never have already emailed about an alert row that
+# no longer exists.
+_PENDING_ALERTS_KEY = "oms360_pending_inventory_alerts"
+_ALERT_STATUSES = (InventoryStatus.LOW_STOCK.value, InventoryStatus.OUT_OF_STOCK.value)
+
+# alert_id -> time.monotonic() of the last FAILED delivery attempt made by
+# automatic processing (see settings.NOTIFICATION_RETRY_COOLDOWN_SECONDS).
+_last_failed_attempt = {}
+_last_failed_attempt_lock = threading.Lock()
 
 
 def _get_low_stock_threshold(db: Session) -> int:
@@ -77,6 +95,7 @@ def release_stock(db: Session, item_id: str, stock_row: models.Inventory, quanti
     stock_row.used_stock = max(0, stock_row.used_stock - quantity)
     _write_ledger(db, item_id, InventoryMovementType.RELEASE, quantity,
                   stock_row.remaining_stock, reference_order_id=order_id, reason=reason)
+    _recover_status_if_cleared(db, stock_row)
 
 
 def restock(db: Session, item_id: str, quantity: int, reason: str = "Manual restock") -> models.Inventory:
@@ -96,6 +115,7 @@ def restock(db: Session, item_id: str, quantity: int, reason: str = "Manual rest
     stock_row.total_stock += quantity
     if stock_row.status == InventoryStatus.OUT_OF_STOCK.value:
         stock_row.status = InventoryStatus.ACTIVE.value
+    _recover_status_if_cleared(db, stock_row)
 
     _write_ledger(db, item_id, InventoryMovementType.RESTOCK, quantity,
                   stock_row.remaining_stock, reference_order_id=None, reason=reason)
@@ -232,6 +252,10 @@ def update_item(db: Session, item_id: str, price: float = None, status: str = No
         item_row.unit = stock_row.unit
         db.commit()
 
+    # Alert emails (if a stock correction raised one) go out only after the
+    # update above is committed. Never raises.
+    dispatch_pending_notifications(db)
+
     logger.info(f"Updated inventory item {item_id} (price={price}, status={status}, "
                 f"item_name={item_name}, stock={stock}, category={category}, unit={unit})")
     return stock_row
@@ -288,16 +312,71 @@ def _write_ledger(db: Session, item_id: str, movement_type: InventoryMovementTyp
     ))
 
 
-def _maybe_raise_alert(db: Session, stock_row: models.Inventory):
-    threshold = _get_low_stock_threshold(db)
+def _classify_stock_level(stock_row: models.Inventory, threshold: int):
+    """(alert_type, status_value) for a depleted row, or None if above threshold."""
     if stock_row.remaining_stock <= 0:
-        alert_type, status_value = "OUT_OF_STOCK", InventoryStatus.OUT_OF_STOCK.value
-    elif stock_row.remaining_stock <= threshold:
-        alert_type, status_value = "LOW_STOCK", InventoryStatus.LOW_STOCK.value
-    else:
-        return
+        return "OUT_OF_STOCK", InventoryStatus.OUT_OF_STOCK.value
+    if stock_row.remaining_stock <= threshold:
+        return "LOW_STOCK", InventoryStatus.LOW_STOCK.value
+    return None
 
+
+def _latest_alert(db: Session, item_id: str) -> Optional[models.InventoryAlert]:
+    return (
+        db.query(models.InventoryAlert)
+        .filter(models.InventoryAlert.item_id == item_id)
+        .order_by(models.InventoryAlert.alert_id.desc())
+        .first()
+    )
+
+
+def _queue_for_dispatch(db: Session, alert_row: models.InventoryAlert):
+    queued = db.info.setdefault(_PENDING_ALERTS_KEY, [])
+    if not any(existing is alert_row for existing in queued):
+        queued.append(alert_row)
+
+
+def _maybe_raise_alert(db: Session, stock_row: models.Inventory):
+    """Flags a depleted row LOW_STOCK/OUT_OF_STOCK and records an
+    inventory_alerts row with notification_status=PENDING, queued for email
+    delivery after the caller commits (dispatch_pending_notifications()).
+
+    2026-11-20 de-duplication: a new alert row (and email) is only created
+    when the item ENTERS a danger state - ACTIVE/INACTIVE -> LOW_STOCK,
+    anything -> OUT_OF_STOCK, OUT_OF_STOCK -> LOW_STOCK. If the item was
+    already in that state and its latest alert is of the same type, that
+    same alert is reused: if it was already SENT nothing more happens (no
+    duplicate email per order); if it is still PENDING/FAILED it is queued
+    again so a previously undelivered alert is retried. Previously every
+    reservation below the threshold inserted another alert row and sent
+    another email."""
+    threshold = _get_low_stock_threshold(db)
+    level = _classify_stock_level(stock_row, threshold)
+    if level is None:
+        return None
+    alert_type, status_value = level
+
+    previous_status = stock_row.status
     stock_row.status = status_value
+
+    # Same item depleted twice inside one not-yet-committed transaction
+    # (e.g. one order listing the same item on two lines): reuse the alert
+    # already queued on this Session - SessionLocal has autoflush=False, so
+    # it would not be visible to the query below yet.
+    for queued in db.info.get(_PENDING_ALERTS_KEY, []):
+        if queued.item_id == stock_row.item_id and queued.alert_type == alert_type:
+            return queued
+
+    if previous_status == status_value:
+        latest = _latest_alert(db, stock_row.item_id)
+        if latest is not None and latest.alert_type == alert_type:
+            if latest.notification_status != notification_service.STATUS_SENT:
+                _queue_for_dispatch(db, latest)
+            logger.info(f"Inventory alert {alert_type} for {stock_row.item_id} already open "
+                        f"(alert_id={latest.alert_id}, notification_status={latest.notification_status}) "
+                        f"- no duplicate alert created.")
+            return latest
+
     alert_row = models.InventoryAlert(
         item_id=stock_row.item_id,
         item_name=stock_row.item_name,
@@ -305,25 +384,110 @@ def _maybe_raise_alert(db: Session, stock_row: models.Inventory):
         threshold_value=threshold,
         alert_type=alert_type,
         notification_type="EMAIL",
-        notification_status="PENDING",
+        notification_status=notification_service.STATUS_PENDING,
         recipient_email=settings.INVENTORY_ALERT_EMAIL,
     )
     db.add(alert_row)
+    _queue_for_dispatch(db, alert_row)
     logger.warning(f"Inventory alert raised: {alert_type} for {stock_row.item_id} "
                     f"(remaining={stock_row.remaining_stock}, threshold={threshold})")
+    return alert_row
 
-    # 2026-08-28 addition: fire the existing notify_low_stock() stub for
-    # real now (see notification_service.py). Covers both LOW_STOCK and
-    # OUT_OF_STOCK - both are "danger level reached" for this alert row,
-    # which is exactly what notification_type=EMAIL/notification_status
-    # were already modeled for. Never raises - a send failure just leaves
-    # notification_status=FAILED on the alert row instead of blocking the
-    # surrounding stock reservation/adjustment.
-    sent = notification_service.notify_low_stock(
-        stock_row.item_id, stock_row.item_name, stock_row.remaining_stock,
-        recipient_email=settings.INVENTORY_ALERT_EMAIL,
+
+def _in_failed_cooldown(alert_id: int) -> bool:
+    with _last_failed_attempt_lock:
+        last = _last_failed_attempt.get(alert_id)
+    return last is not None and (time.monotonic() - last) < settings.NOTIFICATION_RETRY_COOLDOWN_SECONDS
+
+
+def _deliver_alert(db: Session, alert_row: models.InventoryAlert, respect_cooldown: bool) -> Optional[str]:
+    """Sends one alert email and persists the outcome. Returns the new
+    notification_status, or None if skipped (already SENT / in cooldown)."""
+    if alert_row.notification_status == notification_service.STATUS_SENT:
+        return None
+    if (respect_cooldown and alert_row.notification_status == notification_service.STATUS_FAILED
+            and _in_failed_cooldown(alert_row.alert_id)):
+        logger.info(f"Alert {alert_row.alert_id} email retry skipped (FAILED recently, cooldown active).")
+        return None
+
+    # Deliver to the currently configured recipient; record it on the row
+    # so inventory_alerts.recipient_email shows where the email really went.
+    recipient = (settings.INVENTORY_ALERT_EMAIL or alert_row.recipient_email or "").strip()
+    status = notification_service.send_low_stock_alert(
+        alert_row.item_id, alert_row.item_name, alert_row.remaining_stock, recipient,
+        alert_type=alert_row.alert_type or "LOW_STOCK", threshold=alert_row.threshold_value,
     )
-    alert_row.notification_status = "SENT" if sent else "FAILED"
+    with _last_failed_attempt_lock:
+        if status == notification_service.STATUS_FAILED:
+            _last_failed_attempt[alert_row.alert_id] = time.monotonic()
+        else:
+            _last_failed_attempt.pop(alert_row.alert_id, None)
+
+    alert_row.notification_status = status
+    if recipient and alert_row.recipient_email != recipient:
+        alert_row.recipient_email = recipient
+    db.commit()
+    return status
+
+
+def dispatch_pending_notifications(db: Session, respect_cooldown: bool = True) -> dict:
+    """Sends every alert email queued on this Session by _maybe_raise_alert().
+    Must be called AFTER the caller's db.commit(). Never raises - a failure
+    only leaves notification_status=FAILED (or PENDING if notifications are
+    disabled) on the alert row."""
+    queued = db.info.pop(_PENDING_ALERTS_KEY, [])
+    summary = {"attempted": 0, "sent": 0, "failed": 0, "pending": 0, "skipped": 0, "alerts": []}
+    for alert_row in queued:
+        try:
+            if not sa_inspect(alert_row).persistent:
+                continue  # its transaction was rolled back - nothing to notify about
+            status = _deliver_alert(db, alert_row, respect_cooldown)
+        except Exception:
+            logger.exception("Failed to dispatch inventory alert notification")
+            db.rollback()
+            continue
+        if status is None:
+            summary["skipped"] += 1
+            continue
+        summary["attempted"] += 1
+        summary[status.lower()] += 1
+        summary["alerts"].append({
+            "alert_id": alert_row.alert_id, "item_id": alert_row.item_id,
+            "alert_type": alert_row.alert_type, "notification_status": status,
+        })
+    return summary
+
+
+def dispatch_open_alerts(db: Session) -> dict:
+    """Backs POST /api/v1/inventory/alerts/dispatch-pending. For every item
+    that is CURRENTLY low/out of stock, (re)sends its latest alert if that
+    alert matches the item's current level and was never SENT. This is how
+    alerts recorded while notifications were disabled (or while SMTP was
+    failing) get delivered without waiting for the stock to change again.
+    Never creates alert rows and never touches inventory rows. Ignores the
+    automatic-retry cooldown."""
+    threshold = _get_low_stock_threshold(db)
+    rows = (
+        db.query(models.Inventory)
+        .filter(models.Inventory.remaining_stock <= threshold)
+        .order_by(models.Inventory.item_id)
+        .all()
+    )
+    for stock_row in rows:
+        level = _classify_stock_level(stock_row, threshold)
+        latest = _latest_alert(db, stock_row.item_id)
+        if (level and latest is not None and latest.alert_type == level[0]
+                and latest.notification_status != notification_service.STATUS_SENT):
+            _queue_for_dispatch(db, latest)
+    return dispatch_pending_notifications(db, respect_cooldown=False)
+
+
+def _recover_status_if_cleared(db: Session, stock_row: models.Inventory):
+    """Restock/release: once stock is back above the threshold, a LOW_STOCK/
+    OUT_OF_STOCK row returns to ACTIVE, so the next depletion is treated as
+    a new alert episode (and emailed) instead of being de-duplicated."""
+    if stock_row.status in _ALERT_STATUSES and stock_row.remaining_stock > _get_low_stock_threshold(db):
+        stock_row.status = InventoryStatus.ACTIVE.value
 
 
 def _recompute_status_from_stock(db: Session, stock_row: models.Inventory):

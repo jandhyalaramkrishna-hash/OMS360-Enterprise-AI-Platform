@@ -4,6 +4,17 @@ Reverse-chronological. One entry per sprint or significant change. Each entry sh
 
 ---
 
+## 2026-11-20 — Maintenance: Low-stock email notification fix validated and closed (DEF-006)
+
+- Fixed five defects in the inventory alert email flow (`notification_service.py`, `inventory_service.py`, `order_service.py`, `routes/inventory.py`, `config.py`): accurate PENDING/SENT/FAILED outcome, email after commit, one alert per episode, cooldown retry, new `POST /api/v1/inventory/alerts/dispatch-pending`, credential-safe SMTP logging. No schema, migration, Kafka or inventory-data change.
+- Root-caused "tests not found in container": `docker compose up -d --force-recreate` reused the stale image. Fixed by rebuilding `oms360-engine` / `oms360-consumer` (DEC-0034); no Dockerfile change.
+- Tests: new `tests/test_inventory_notifications.py` 33/33 passed; existing `tests/test_inventory.py` 8/8 passed — **41 passed, 0 failed, 0 skipped**.
+- Live integration test LIT-NOTIF-001: exactly one Gmail email delivered for alert 12 (ITEM-1053, LOW_STOCK, stock 3, threshold 5) via `scripts/dispatch_single_alert.py`; alert 12 → SENT; alerts 5, 6, 13 left PENDING and not sent.
+- Docs updated: `docs/release/LOW_STOCK_EMAIL_CLOSURE_REPORT_2026-11-20.md` (new), `docs/12_Test_Summary_Report.md` §8, `docs/11_Defect_Report.md` DEF-006, `docs/governance/DECISION-LOG.md` DEC-0034, `docs/governance/MODULE-STATUS.md` (Notification Service), this log.
+- **Next step:** Project Owner to decide on pending alerts 5, 6, 13 and approve pushing the commit.
+
+---
+
 ## 2026-07-19 — Sprint 0 (continued): Official project name adopted; enterprise folder reorg; Sprint 0 frozen
 
 - Product Owner designated the official project name: **Project-5-OMS360-Food-Delivery-AI-Enterprise-Platform**, and directed all completed documentation to be reorganized into a standard enterprise folder structure ahead of Sprint 1.

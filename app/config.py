@@ -70,6 +70,15 @@ class ApplicationSettings:
     EMAIL_SMTP_PASSWORD: str = os.getenv("OMS360_EMAIL_SMTP_PASSWORD", "")
     INVENTORY_ALERT_EMAIL: str = os.getenv("OMS360_INVENTORY_ALERT_EMAIL", "jandhyala.ramkrishna@gmail.com")
 
+    # 2026-11-20 addition (low-stock email fix): SMTP socket timeout, and
+    # the minimum gap before an alert whose email FAILED is automatically
+    # retried again by ordinary stock processing (so a broken SMTP setup
+    # can't add an SMTP round-trip to every single order). The manual
+    # POST /api/v1/inventory/alerts/dispatch-pending endpoint ignores the
+    # cooldown.
+    EMAIL_SMTP_TIMEOUT_SECONDS: float = float(os.getenv("OMS360_EMAIL_SMTP_TIMEOUT", "10"))
+    NOTIFICATION_RETRY_COOLDOWN_SECONDS: int = int(os.getenv("OMS360_NOTIFICATION_RETRY_COOLDOWN_SECONDS", "300"))
+
     # GPS / delivery tracking - placeholder for future live tracking (V2 roadmap)
     GPS_PROVIDER: str = os.getenv("OMS360_GPS_PROVIDER", "")
     GPS_API_KEY: str = os.getenv("OMS360_GPS_API_KEY", "")

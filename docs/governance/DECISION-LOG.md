@@ -99,3 +99,12 @@ Format:
 ---
 
 *Open item: DEC-pending — choice of first module for Sprint 1 and repo location (already resolved at the top level by DEC-0008; still open: internal `backend/` layout, and the first module to implement) — superseded in practice by the pending arrival of `OMS360_v1.2_Production_Release.zip` (DEC-0006), which will likely determine both. Will be logged as DEC-0011 once resolved.*
+
+### DEC-0034 — Low-stock email fix: deploy by image rebuild; live test via one-off single-alert script
+- Date: 2026-11-20
+- Sprint: Maintenance — Low-Stock Email Notification Fix (DEF-006)
+- Decision: (1) Deploy the fix by rebuilding the `oms360-engine` / `oms360-consumer` images; keep the existing single-stage Dockerfile that bakes `tests/` and pytest into the image. (2) Perform the controlled live Gmail test with `scripts/dispatch_single_alert.py`, piped into the running container, which calls the existing `inventory_service._deliver_alert()` for one alert ID with pre-checks (flag on, expected recipient, expected item, PENDING/FAILED). No new API endpoint.
+- Reason: The missing-tests error was caused by `--force-recreate` reusing a stale image, not by the Dockerfile or `.dockerignore` (none exists). Tests are run in-container via `docker exec`, and Jenkins runs pytest on the host, so a separate test stage would change the architecture without fixing anything. A one-off script reuses the production delivery code path while guaranteeing only one alert is sent.
+- Alternatives Considered: Multi-stage Dockerfile with a test stage — deferred (optional cleanup). A permanent "dispatch one alert" API endpoint — rejected as unnecessary surface for a one-time test. Calling bulk `dispatch-pending` — rejected, it would also send alerts 5, 6 and 13.
+- Status: Active
+- Note: DECISION-LOG headings stop at DEC-0010, while code comments cite DEC-0011 to DEC-0033; DEC-0034 was chosen to avoid an ID collision.

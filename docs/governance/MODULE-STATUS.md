@@ -14,7 +14,7 @@ Update this doc at the end of every sprint. Status values: **Not Started**, **In
 | 6 | Payment Processing | Not Started | 2026-07-19 | |
 | 7 | Kafka Event Processing | Not Started | 2026-07-19 | |
 | 8 | Delivery Management | Not Started | 2026-07-19 | |
-| 9 | Notification Service | Not Started | 2026-07-19 | |
+| 9 | Notification Service | Complete (inventory alert email) | 2026-11-20 | Low-stock / out-of-stock Gmail alerts fixed and validated: 41 automated tests passed + live Gmail delivery (LIT-NOTIF-001). See `docs/release/LOW_STOCK_EMAIL_CLOSURE_REPORT_2026-11-20.md`. Other notification types not re-verified. |
 | 10 | Health Monitoring | Not Started | 2026-07-19 | |
 | 11 | Metrics Monitoring | Not Started | 2026-07-19 | |
 | 12 | Audit Trail | Not Started | 2026-07-19 | |

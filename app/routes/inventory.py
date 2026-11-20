@@ -37,6 +37,17 @@ def get_alerts(limit: int = 50, db: Session = Depends(get_db)):
     return inventory_service.get_alerts(db, limit=limit)
 
 
+@router.post("/alerts/dispatch-pending",
+             summary="Send undelivered low-stock / out-of-stock alert emails",
+             description="For every item that is currently LOW_STOCK/OUT_OF_STOCK, re-sends its "
+                         "latest inventory_alerts email if notification_status is PENDING or FAILED "
+                         "(e.g. alerts recorded while notifications were disabled or SMTP was "
+                         "failing). Already-SENT alerts are never re-sent. Does not create alerts "
+                         "or modify inventory rows. Returns a per-alert delivery summary.")
+def dispatch_pending_alerts(db: Session = Depends(get_db)):
+    return inventory_service.dispatch_open_alerts(db)
+
+
 @router.get("/history", response_model=List[schemas.InventoryLedgerResponse],
             summary="Stock movement ledger",
             description="Every restock/reserve/release/adjustment, newest first. "

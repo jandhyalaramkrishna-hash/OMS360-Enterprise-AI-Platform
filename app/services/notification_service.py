@@ -17,15 +17,44 @@ with no .env) still behaves exactly as it did previously.
 2026-08-28 (later same day): prefixed the low-stock subject line with a
 yellow warning emoji (U+26A0 WARNING SIGN) per request, purely so the alert
 is easier to spot at a glance in an inbox - no behavior change.
+
+2026-11-20 fix (Low Stock Email Notification defect):
+  - Added send_low_stock_alert(), which returns an accurate delivery
+    outcome instead of a bare bool:
+        PENDING - notifications_enabled is off, so nothing was attempted.
+                  The alert stays eligible to be sent once the flag is on.
+        SENT    - the SMTP server accepted the message.
+        FAILED  - delivery was attempted and did not succeed (SMTP config
+                  incomplete, connection/TLS error, authentication
+                  rejected, recipient refused, ...).
+    Previously every not-sent case (including "feature disabled") was
+    collapsed into False and stored as FAILED, so a disabled-then-re-enabled
+    environment could not tell "never attempted" from "Gmail rejected the
+    login", and nothing ever retried either.
+  - notify_low_stock() is kept with its original signature/bool return for
+    backward compatibility; it now delegates to send_low_stock_alert().
+  - OUT_OF_STOCK alerts now get their own subject/body wording.
+  - SMTP failures are classified (auth / recipient refused / connection)
+    and logged WITHOUT credentials. The password is never logged; the
+    username is masked.
+  - Surrounding whitespace / stray CR from a CRLF .env is trimmed from the
+    SMTP password before login.
 """
 
 import smtplib
+import socket
 from email.mime.text import MIMEText
 
 from app.config import settings
 from app.core.logging_config import get_logger
 
 logger = get_logger("oms360.services.notification_service")
+
+# notification_status values stored on inventory_alerts (varchar(20) -
+# existing column, no schema change).
+STATUS_PENDING = "PENDING"
+STATUS_SENT = "SENT"
+STATUS_FAILED = "FAILED"
 
 
 def notify_order_delivered(order_id: str, customer_name: str, mobile: str):
@@ -38,45 +67,107 @@ def notify_payment_failed(order_id: str, customer_name: str, mobile: str, reason
           f"Hi {customer_name}, payment for order {order_id} failed: {reason}")
 
 
-def notify_low_stock(item_id: str, item_name: str, remaining_stock: int, recipient_email: str):
+def notify_low_stock(item_id: str, item_name: str, remaining_stock: int, recipient_email: str,
+                     alert_type: str = "LOW_STOCK", threshold: int = None) -> bool:
+    """Backward-compatible wrapper: True only when the email was actually sent."""
+    return send_low_stock_alert(item_id, item_name, remaining_stock, recipient_email,
+                                alert_type=alert_type, threshold=threshold) == STATUS_SENT
+
+
+def send_low_stock_alert(item_id: str, item_name: str, remaining_stock: int, recipient_email: str,
+                         alert_type: str = "LOW_STOCK", threshold: int = None) -> str:
+    """Sends one inventory alert email. Never raises. Returns PENDING/SENT/FAILED."""
     if not settings.FEATURE_FLAGS.get("notifications_enabled", False):
-        logger.info(f"[notifications disabled] Would alert {recipient_email or '(no recipient configured)'} "
-                    f"about low stock: {item_name} ({item_id}) at {remaining_stock} remaining.")
-        return False
+        logger.info(f"[notifications disabled] {alert_type} alert for {item_name} ({item_id}) "
+                    f"at {remaining_stock} remaining left PENDING - not sent.")
+        return STATUS_PENDING
 
-    if not recipient_email or not settings.EMAIL_SMTP_HOST or not settings.EMAIL_SMTP_USERNAME:
-        logger.info(f"[STUB - SMTP not configured] Low stock email queued for {recipient_email}: "
-                    f"{item_name} ({item_id}) at {remaining_stock} remaining.")
-        return False
+    missing = [name for name, value in (
+        ("OMS360_INVENTORY_ALERT_EMAIL (recipient)", recipient_email),
+        ("OMS360_EMAIL_SMTP_HOST", settings.EMAIL_SMTP_HOST),
+        ("OMS360_EMAIL_SMTP_USERNAME", settings.EMAIL_SMTP_USERNAME),
+        ("OMS360_EMAIL_SMTP_PASSWORD", settings.EMAIL_SMTP_PASSWORD),
+    ) if not (value or "").strip()]
+    if missing:
+        logger.error(f"Inventory alert email NOT sent for {item_id}: SMTP configuration incomplete "
+                     f"(missing: {', '.join(missing)}).")
+        return STATUS_FAILED
 
-    return _send_email(
-        to_address=recipient_email,
-        subject=f"⚠️ OMS-360 Inventory Alert: {item_name} at danger level ({remaining_stock} remaining)",
-        body=(f"Inventory item '{item_name}' ({item_id}) has reached the low-stock danger level.\n\n"
-              f"Remaining stock: {remaining_stock}\n\n"
-              f"This is an automated alert from OMS-360 Inventory Monitoring."),
-    )
+    subject, body = _build_alert_message(item_id, item_name, remaining_stock, alert_type, threshold)
+    return STATUS_SENT if _send_email(recipient_email.strip(), subject, body) else STATUS_FAILED
+
+
+def _build_alert_message(item_id, item_name, remaining_stock, alert_type, threshold):
+    threshold_line = f"Low-stock threshold: {threshold}\n" if threshold is not None else ""
+    if alert_type == "OUT_OF_STOCK":
+        subject = f"⚠️ OMS-360 Inventory Alert: {item_name} is OUT OF STOCK"
+        headline = f"Inventory item '{item_name}' ({item_id}) is out of stock."
+    else:
+        subject = f"⚠️ OMS-360 Inventory Alert: {item_name} at danger level ({remaining_stock} remaining)"
+        headline = f"Inventory item '{item_name}' ({item_id}) has reached the low-stock danger level."
+    body = (f"{headline}\n\n"
+            f"Alert type: {alert_type}\n"
+            f"Remaining stock: {remaining_stock}\n"
+            f"{threshold_line}\n"
+            f"This is an automated alert from OMS-360 Inventory Monitoring.")
+    return subject, body
+
+
+def _mask(address: str) -> str:
+    if not address or "@" not in address:
+        return "***"
+    local, domain = address.split("@", 1)
+    return f"{local[:2]}***@{domain}"
 
 
 def _send_email(to_address: str, subject: str, body: str) -> bool:
     """Minimal stdlib SMTP send (smtplib + email.mime.text) - no new
-    dependency added to requirements.txt. Uses the same EMAIL_SMTP_*
-    settings notify_low_stock() already read from config.py."""
+    dependency added to requirements.txt. Never logs the SMTP password."""
+    username = settings.EMAIL_SMTP_USERNAME.strip()
+    password = (settings.EMAIL_SMTP_PASSWORD or "").strip()
+
     message = MIMEText(body)
     message["Subject"] = subject
-    message["From"] = settings.EMAIL_FROM_ADDRESS or settings.EMAIL_SMTP_USERNAME
+    message["From"] = (settings.EMAIL_FROM_ADDRESS or username).strip()
     message["To"] = to_address
 
     try:
-        with smtplib.SMTP(settings.EMAIL_SMTP_HOST, settings.EMAIL_SMTP_PORT, timeout=10) as server:
+        with smtplib.SMTP(settings.EMAIL_SMTP_HOST.strip(), settings.EMAIL_SMTP_PORT,
+                          timeout=settings.EMAIL_SMTP_TIMEOUT_SECONDS) as server:
+            server.ehlo()
             server.starttls()
-            server.login(settings.EMAIL_SMTP_USERNAME, settings.EMAIL_SMTP_PASSWORD)
-            server.sendmail(message["From"], [to_address], message.as_string())
+            server.ehlo()
+            server.login(username, password)
+            refused = server.sendmail(message["From"], [to_address], message.as_string())
+        if refused:
+            logger.error(f"Inventory alert email refused for {to_address}: {refused}")
+            return False
         logger.info(f"Email sent to {to_address}: {subject}")
         return True
-    except Exception as exc:
-        logger.error(f"Failed to send email to {to_address}: {exc}")
-        return False
+    except smtplib.SMTPAuthenticationError as exc:
+        logger.error(f"Failed to send email to {to_address}: SMTP authentication rejected for user "
+                     f"{_mask(username)} (code {exc.smtp_code}). For Gmail, check that the App "
+                     f"Password in OMS360_EMAIL_SMTP_PASSWORD is still valid and 2-Step "
+                     f"Verification is on.")
+    except smtplib.SMTPRecipientsRefused as exc:
+        logger.error(f"Failed to send email to {to_address}: recipient refused "
+                     f"({list(exc.recipients.values())}).")
+    except smtplib.SMTPSenderRefused as exc:
+        logger.error(f"Failed to send email to {to_address}: sender {exc.sender} refused "
+                     f"(code {exc.smtp_code}).")
+    except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected) as exc:
+        logger.error(f"Failed to send email to {to_address}: SMTP server "
+                     f"{settings.EMAIL_SMTP_HOST}:{settings.EMAIL_SMTP_PORT} closed/refused the "
+                     f"connection ({type(exc).__name__}).")
+    except smtplib.SMTPException as exc:
+        logger.error(f"Failed to send email to {to_address}: SMTP error ({type(exc).__name__}: {exc}).")
+    except (socket.timeout, OSError) as exc:  # DNS failure, timeout, network unreachable
+        logger.error(f"Failed to send email to {to_address}: cannot reach SMTP server "
+                     f"{settings.EMAIL_SMTP_HOST}:{settings.EMAIL_SMTP_PORT} "
+                     f"({type(exc).__name__}: {exc}).")
+    except Exception as exc:  # never let a notification break the caller
+        logger.error(f"Failed to send email to {to_address}: {type(exc).__name__}: {exc}")
+    return False
 
 
 def _send(event_type: str, order_id: str, customer_name: str, mobile: str, message: str):

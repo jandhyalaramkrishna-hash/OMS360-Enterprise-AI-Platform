@@ -89,3 +89,33 @@ Before this project can be called fully runtime-verified end to end, the
 confirmed-clean Playwright run #2. Everything currently claimed as
 "executed" above is real, sourced, and cited — nothing in this report
 extrapolates a pass from a code review alone.
+
+## 8. Addendum 2026-11-20 — Low-Stock Email Notification Fix (executed, real results)
+
+Executed on the Project Owner's machine in the local Docker environment
+after rebuilding the `oms360-engine` / `oms360-consumer` images. Full
+evidence: `docs/release/LOW_STOCK_EMAIL_CLOSURE_REPORT_2026-11-20.md`.
+Defect: `docs/11_Defect_Report.md` DEF-006.
+
+### 8.1 Automated tests — PASS
+
+| Suite | Passed | Failed | Skipped | Source |
+|---|---|---|---|---|
+| `tests/test_inventory_notifications.py` (new; SQLite + fake SMTP, no real email) | **33** | 0 | 0 | `docker exec oms360_core_engine python -m pytest …`, 2026-11-20 |
+| `tests/test_inventory.py` (existing; live MySQL, run with `OMS360_FEATURE_NOTIFICATIONS=false`) | **8** | 0 | 0 | same run |
+| **Total** | **41** | **0** | **0** | |
+
+### 8.2 Live integration test — LIT-NOTIF-001 — PASS
+
+| Field | Result |
+|---|---|
+| Scope | One inventory alert email through real Gmail SMTP (`smtp.gmail.com:587`, STARTTLS, App Password) |
+| Method | `scripts/dispatch_single_alert.py` piped into `oms360_core_engine` — existing `_deliver_alert()` code path, alert 12 only; bulk `dispatch-pending` not invoked |
+| Alert | ID 12 — ITEM-1053 — LOW_STOCK — stock 3 — threshold 5 |
+| SMTP result | SENT — email received at jandhyala.ramkrishna@gmail.com |
+| Emails sent | Exactly 1 |
+| Database | Alert 12 PENDING → SENT; alerts 5, 6, 13 unchanged (PENDING); ITEM-1053 stock unchanged (3) |
+| Credentials in logs | None |
+
+Pending alerts 5, 6 and 13 were deliberately not sent; see the closure
+report §7.
