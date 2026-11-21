@@ -32,7 +32,7 @@ from app.services import inventory_service, notification_service
 TEST_PASSWORD = "abcdwxyzsecretpw"   # fake app password - must never appear in logs
 TEST_USER = "ops.sender@example.com"
 TEST_RECIPIENT = "admin.alerts@example.com"
-THRESHOLD = 10                      # inventory_service.DEFAULT_LOW_STOCK_THRESHOLD
+THRESHOLD = 5                       # inventory_service.DEFAULT_LOW_STOCK_THRESHOLD (LOW_STOCK when remaining < 5)
 
 
 # --------------------------------------------------------------------------
@@ -106,6 +106,7 @@ def smtp_env(monkeypatch):
     monkeypatch.setattr(settings, "EMAIL_FROM_ADDRESS", TEST_USER)
     monkeypatch.setattr(settings, "INVENTORY_ALERT_EMAIL", TEST_RECIPIENT)
     monkeypatch.setattr(settings, "NOTIFICATION_RETRY_COOLDOWN_SECONDS", 300)
+    monkeypatch.setattr(settings, "EMAIL_PROVIDER", "smtp")   # local default transport
     inventory_service._last_failed_attempt.clear()
     yield
     FakeSMTP.reset()
@@ -145,7 +146,7 @@ def captured_logs():
         lg.setLevel(lvl)
 
 
-def _add_item(db, item_id="ITEM-T1", stock=12, status="ACTIVE", name="Paneer Tikka"):
+def _add_item(db, item_id="ITEM-T1", stock=7, status="ACTIVE", name="Paneer Tikka"):
     row = models.Inventory(item_id=item_id, item_name=name, price=100, total_stock=stock,
                            remaining_stock=stock, used_stock=0, status=status)
     db.add(row)
@@ -171,7 +172,7 @@ def _alerts(db, item_id="ITEM-T1"):
 # --------------------------------------------------------------------------
 def test_successful_delivery_returns_sent_and_uses_tls_login(captured_logs):
     status = notification_service.send_low_stock_alert("ITEM-T1", "Paneer Tikka", 4, TEST_RECIPIENT,
-                                                       alert_type="LOW_STOCK", threshold=10)
+                                                       alert_type="LOW_STOCK", threshold=THRESHOLD)
     assert status == notification_service.STATUS_SENT
     smtp = FakeSMTP.instances[0]
     assert (smtp.host, smtp.port) == ("smtp.gmail.com", 587)
@@ -254,20 +255,20 @@ def test_notify_low_stock_keeps_backward_compatible_bool():
 # inventory_service integration (SQLite + fake SMTP)
 # --------------------------------------------------------------------------
 def test_crossing_threshold_creates_one_alert_and_sends_email(db):
-    _add_item(db, stock=12)
-    summary = _reserve(db, "ITEM-T1", 3)                       # 12 -> 9 (<= 10)
+    _add_item(db, stock=7)
+    summary = _reserve(db, "ITEM-T1", 3)                       # 7 -> 4 (< 5)
     alerts = _alerts(db)
     assert len(alerts) == 1
     a = alerts[0]
     assert (a.alert_type, a.notification_status, a.recipient_email) == ("LOW_STOCK", "SENT", TEST_RECIPIENT)
-    assert (a.remaining_stock, a.threshold_value) == (9, THRESHOLD)
+    assert (a.remaining_stock, a.threshold_value) == (4, THRESHOLD)
     assert summary["sent"] == 1 and len(FakeSMTP.all_sent()) == 1
     assert FakeSMTP.all_sent()[0][1] == [TEST_RECIPIENT]
     assert db.get(models.Inventory, "ITEM-T1").status == "LOW_STOCK"
 
 
 def test_email_is_not_sent_before_the_transaction_commits(db):
-    _add_item(db, stock=12)
+    _add_item(db, stock=7)
     row = inventory_service.lock_and_fetch(db, ["ITEM-T1"])["ITEM-T1"]
     inventory_service.reserve_stock(db, "ITEM-T1", row, 3, "ORD-1")
     assert FakeSMTP.instances == []                            # nothing sent mid-transaction
@@ -277,7 +278,7 @@ def test_email_is_not_sent_before_the_transaction_commits(db):
 
 
 def test_rolled_back_transaction_sends_no_email(db):
-    _add_item(db, stock=12)
+    _add_item(db, stock=7)
     _add_item(db, item_id="ITEM-T2", stock=1, name="Lassi")
     rows = inventory_service.lock_and_fetch(db, ["ITEM-T1", "ITEM-T2"])
     inventory_service.reserve_stock(db, "ITEM-T1", rows["ITEM-T1"], 3, "ORD-9")  # raises alert
@@ -290,16 +291,16 @@ def test_rolled_back_transaction_sends_no_email(db):
 
 
 def test_repeated_low_stock_processing_does_not_duplicate_alerts_or_emails(db):
-    _add_item(db, stock=12)
-    _reserve(db, "ITEM-T1", 3, "ORD-1")                        # 9  -> alert + email
-    _reserve(db, "ITEM-T1", 1, "ORD-2")                        # 8
-    _reserve(db, "ITEM-T1", 2, "ORD-3")                        # 6
+    _add_item(db, stock=7)
+    _reserve(db, "ITEM-T1", 3, "ORD-1")                        # 4  -> alert + email
+    _reserve(db, "ITEM-T1", 1, "ORD-2")                        # 3
+    _reserve(db, "ITEM-T1", 2, "ORD-3")                        # 1
     assert len(_alerts(db)) == 1
     assert len(FakeSMTP.all_sent()) == 1
 
 
 def test_same_item_twice_in_one_transaction_creates_single_alert(db):
-    _add_item(db, stock=12)
+    _add_item(db, stock=7)
     row = inventory_service.lock_and_fetch(db, ["ITEM-T1"])["ITEM-T1"]
     inventory_service.reserve_stock(db, "ITEM-T1", row, 3, "ORD-1")
     inventory_service.reserve_stock(db, "ITEM-T1", row, 1, "ORD-1")
@@ -309,9 +310,9 @@ def test_same_item_twice_in_one_transaction_creates_single_alert(db):
 
 
 def test_low_to_out_of_stock_sends_out_of_stock_notification(db):
-    _add_item(db, stock=12)
+    _add_item(db, stock=7)
     _reserve(db, "ITEM-T1", 3)                                 # LOW_STOCK
-    _reserve(db, "ITEM-T1", 9)                                 # 0 -> OUT_OF_STOCK
+    _reserve(db, "ITEM-T1", 4)                                 # 0 -> OUT_OF_STOCK
     alerts = _alerts(db)
     assert [a.alert_type for a in alerts] == ["LOW_STOCK", "OUT_OF_STOCK"]
     assert all(a.notification_status == "SENT" for a in alerts)
@@ -321,14 +322,14 @@ def test_low_to_out_of_stock_sends_out_of_stock_notification(db):
 
 
 def test_direct_active_to_out_of_stock_sends_one_email(db):
-    _add_item(db, stock=12)
-    _reserve(db, "ITEM-T1", 12)
+    _add_item(db, stock=7)
+    _reserve(db, "ITEM-T1", 7)
     assert [a.alert_type for a in _alerts(db)] == ["OUT_OF_STOCK"]
     assert len(FakeSMTP.all_sent()) == 1
 
 
 def test_smtp_failure_marks_failed_then_retries_after_cooldown_without_new_row(db, monkeypatch):
-    _add_item(db, stock=12)
+    _add_item(db, stock=7)
     FakeSMTP.fail_login = smtplib.SMTPAuthenticationError(535, b"bad credentials")
     _reserve(db, "ITEM-T1", 3, "ORD-1")
     assert _alerts(db)[0].notification_status == "FAILED"
@@ -354,7 +355,7 @@ def test_smtp_failure_marks_failed_then_retries_after_cooldown_without_new_row(d
 
 def test_notifications_disabled_leaves_pending_and_dispatch_delivers_later(db, monkeypatch):
     monkeypatch.setitem(settings.FEATURE_FLAGS, "notifications_enabled", False)
-    _add_item(db, stock=12)
+    _add_item(db, stock=7)
     _reserve(db, "ITEM-T1", 3)
     assert _alerts(db)[0].notification_status == "PENDING"
     assert FakeSMTP.instances == []
@@ -373,12 +374,12 @@ def test_dispatch_open_alerts_resends_existing_failed_records_without_touching_i
     # LOW_STOCK, its alert stuck at FAILED.
     _add_item(db, stock=4, status="LOW_STOCK")
     db.add(models.InventoryAlert(item_id="ITEM-T1", item_name="Paneer Tikka", remaining_stock=4,
-                                 threshold_value=10, alert_type="LOW_STOCK", notification_type="EMAIL",
+                                 threshold_value=THRESHOLD, alert_type="LOW_STOCK", notification_type="EMAIL",
                                  notification_status="FAILED", recipient_email=TEST_RECIPIENT))
     # Stale alert for an item that has since been restocked - must be ignored.
     _add_item(db, item_id="ITEM-T2", stock=80, name="Lassi")
     db.add(models.InventoryAlert(item_id="ITEM-T2", item_name="Lassi", remaining_stock=2,
-                                 threshold_value=10, alert_type="LOW_STOCK", notification_type="EMAIL",
+                                 threshold_value=THRESHOLD, alert_type="LOW_STOCK", notification_type="EMAIL",
                                  notification_status="FAILED", recipient_email=TEST_RECIPIENT))
     db.commit()
     before = [(r.item_id, r.remaining_stock, r.total_stock, r.used_stock, r.status)
@@ -396,15 +397,15 @@ def test_dispatch_open_alerts_resends_existing_failed_records_without_touching_i
 
 
 def test_existing_low_stock_item_without_alert_gets_alert_on_next_reservation(db):
-    _add_item(db, stock=6, status="LOW_STOCK")                 # e.g. seeded/manual status
-    _reserve(db, "ITEM-T1", 1)
+    _add_item(db, stock=4, status="LOW_STOCK")                 # e.g. seeded/manual status
+    _reserve(db, "ITEM-T1", 1)                                 # 3
     assert len(_alerts(db)) == 1 and len(FakeSMTP.all_sent()) == 1
 
 
 def test_recipient_comes_from_current_configuration(db, monkeypatch):
     monkeypatch.setattr(settings, "INVENTORY_ALERT_EMAIL", "")
     monkeypatch.setitem(settings.FEATURE_FLAGS, "notifications_enabled", True)
-    _add_item(db, stock=12)
+    _add_item(db, stock=7)
     _reserve(db, "ITEM-T1", 3)
     assert _alerts(db)[0].notification_status == "FAILED"      # no recipient -> not sent
 
@@ -425,29 +426,29 @@ def test_update_item_stock_correction_emails_once_and_restock_starts_new_episode
     inventory_service.restock(db, "ITEM-T1", 40)                # 43 > threshold -> ACTIVE
     assert db.get(models.Inventory, "ITEM-T1").status == "ACTIVE"
 
-    _reserve(db, "ITEM-T1", 35)                                 # 8 -> new LOW_STOCK episode
+    _reserve(db, "ITEM-T1", 40)                                 # 3 -> new LOW_STOCK episode
     assert [a.alert_type for a in _alerts(db)] == ["LOW_STOCK", "LOW_STOCK"]
     assert len(FakeSMTP.all_sent()) == 2
 
 
 def test_update_item_recover_to_active_still_works(db):
-    _add_item(db, stock=5, status="LOW_STOCK")
+    _add_item(db, stock=3, status="LOW_STOCK")
     row = inventory_service.update_item(db, "ITEM-T1", stock=500)
     assert row.status == "ACTIVE" and FakeSMTP.instances == []
 
 
 def test_restock_partial_from_low_stays_low(db):
-    _add_item(db, stock=12)
-    _reserve(db, "ITEM-T1", 6)                                  # 6, LOW_STOCK
-    inventory_service.restock(db, "ITEM-T1", 2)                 # 8, still <= 10
+    _add_item(db, stock=7)
+    _reserve(db, "ITEM-T1", 4)                                  # 3, LOW_STOCK
+    inventory_service.restock(db, "ITEM-T1", 1)                 # 4, still < 5
     assert db.get(models.Inventory, "ITEM-T1").status == "LOW_STOCK"
     _reserve(db, "ITEM-T1", 1)
     assert len(FakeSMTP.all_sent()) == 1                        # still same episode
 
 
 def test_release_stock_above_threshold_recovers_status(db):
-    _add_item(db, stock=12)
-    _reserve(db, "ITEM-T1", 5)                                  # 7, LOW_STOCK
+    _add_item(db, stock=7)
+    _reserve(db, "ITEM-T1", 5)                                  # 2, LOW_STOCK
     row = inventory_service.lock_and_fetch(db, ["ITEM-T1"])["ITEM-T1"]
     inventory_service.release_stock(db, "ITEM-T1", row, 5, "ORD-1", "Cancelled")
     db.commit()
@@ -455,7 +456,7 @@ def test_release_stock_above_threshold_recovers_status(db):
 
 
 def test_no_password_in_logs_across_full_failure_flow(db, captured_logs):
-    _add_item(db, stock=12)
+    _add_item(db, stock=7)
     FakeSMTP.fail_login = smtplib.SMTPAuthenticationError(535, b"5.7.8 not accepted")
     _reserve(db, "ITEM-T1", 3)
     FakeSMTP.fail_login = None
@@ -473,7 +474,7 @@ def test_dispatch_pending_route(db, monkeypatch):
     from app.routes import inventory as inventory_routes
 
     monkeypatch.setitem(settings.FEATURE_FLAGS, "notifications_enabled", False)
-    _add_item(db, stock=12)
+    _add_item(db, stock=7)
     _reserve(db, "ITEM-T1", 3)
     monkeypatch.setitem(settings.FEATURE_FLAGS, "notifications_enabled", True)
 
@@ -487,3 +488,276 @@ def test_dispatch_pending_route(db, monkeypatch):
     body = resp.json()
     assert body["sent"] == 1 and body["alerts"][0]["notification_status"] == "SENT"
     assert client.post("/api/v1/inventory/alerts/dispatch-pending").json()["attempted"] == 0
+
+
+# --------------------------------------------------------------------------
+# create_item(): new item created already at / below the threshold
+# (DEF-007, 2026-11-21 - "Millet Idly created with stock 2 stayed ACTIVE,
+# no alert, no email")
+# --------------------------------------------------------------------------
+def _created_alerts(db, item_id):
+    return _alerts(db, item_id)
+
+
+def test_create_item_below_threshold_is_low_stock_with_one_alert_and_email(db):
+    row = inventory_service.create_item(db, item_name="Millet Idly", price=150, total_stock=2,
+                                        status="ACTIVE")   # dialog always sends ACTIVE
+    assert row.status == "LOW_STOCK"
+    assert db.get(models.Item, row.item_id).status == "LOW_STOCK"     # items mirrored
+    alerts = _created_alerts(db, row.item_id)
+    assert len(alerts) == 1
+    a = alerts[0]
+    assert (a.item_id, a.item_name, a.alert_type) == (row.item_id, "Millet Idly", "LOW_STOCK")
+    assert (a.remaining_stock, a.threshold_value) == (2, THRESHOLD)
+    assert (a.notification_status, a.recipient_email) == ("SENT", TEST_RECIPIENT)
+    assert len(FakeSMTP.all_sent()) == 1
+
+
+def test_create_item_exactly_at_five_stays_active_without_alert(db):
+    row = inventory_service.create_item(db, item_name="Ragi Malt", price=60, total_stock=5)
+    assert row.status == "ACTIVE"
+    assert _created_alerts(db, row.item_id) == []
+
+
+def test_create_item_above_threshold_stays_active_without_alert(db):
+    row = inventory_service.create_item(db, item_name="Millet Dosa", price=120, total_stock=25,
+                                        status="ACTIVE")
+    assert row.status == "ACTIVE"
+    assert _created_alerts(db, row.item_id) == []
+    assert FakeSMTP.instances == []
+
+
+def test_create_item_with_zero_stock_is_out_of_stock_with_one_alert(db):
+    row = inventory_service.create_item(db, item_name="Jowar Roti", price=40, total_stock=0)
+    assert row.status == "OUT_OF_STOCK"
+    alerts = _created_alerts(db, row.item_id)
+    assert [a.alert_type for a in alerts] == ["OUT_OF_STOCK"]
+    assert len(FakeSMTP.all_sent()) == 1
+
+
+def test_create_item_explicit_inactive_is_kept_and_raises_no_alert(db):
+    row = inventory_service.create_item(db, item_name="Seasonal Item", price=80, total_stock=2,
+                                        status="INACTIVE")
+    assert row.status == "INACTIVE"
+    assert _created_alerts(db, row.item_id) == []
+    assert FakeSMTP.instances == []
+
+
+def test_create_item_low_then_orders_do_not_send_duplicate_emails(db):
+    row = inventory_service.create_item(db, item_name="Millet Idly", price=150, total_stock=4)
+    _reserve(db, row.item_id, 1, "ORD-A")       # 3 - same LOW_STOCK episode
+    _reserve(db, row.item_id, 1, "ORD-B")       # 2
+    assert len(_created_alerts(db, row.item_id)) == 1
+    assert len(FakeSMTP.all_sent()) == 1
+
+
+def test_create_item_with_notifications_disabled_records_pending_alert(db, monkeypatch):
+    monkeypatch.setitem(settings.FEATURE_FLAGS, "notifications_enabled", False)
+    row = inventory_service.create_item(db, item_name="Millet Idly", price=150, total_stock=2)
+    alerts = _created_alerts(db, row.item_id)
+    assert row.status == "LOW_STOCK"
+    assert [a.notification_status for a in alerts] == ["PENDING"]
+    assert FakeSMTP.instances == []
+
+
+def test_create_item_does_not_touch_existing_inventory_rows(db):
+    _add_item(db, item_id="ITEM-T1", stock=3, status="ACTIVE")   # pre-existing low row, no alert
+    inventory_service.create_item(db, item_name="Millet Idly", price=150, total_stock=2)
+    existing = db.get(models.Inventory, "ITEM-T1")
+    assert (existing.status, existing.remaining_stock) == ("ACTIVE", 3)
+    assert _alerts(db, "ITEM-T1") == []
+
+
+# --------------------------------------------------------------------------
+# Business rule boundaries (2026-11-21): remaining_stock 0 -> OUT_OF_STOCK +
+# email, 1-4 -> LOW_STOCK + email, 5 and above -> ACTIVE, no email. Applied
+# identically to item creation, manual stock updates and order reservations.
+# --------------------------------------------------------------------------
+BOUNDARIES = [
+    (0, "OUT_OF_STOCK", ["OUT_OF_STOCK"]),
+    (1, "LOW_STOCK", ["LOW_STOCK"]),
+    (4, "LOW_STOCK", ["LOW_STOCK"]),
+    (5, "ACTIVE", []),
+    (6, "ACTIVE", []),
+]
+
+
+@pytest.mark.parametrize("stock,expected_status,expected_alerts", BOUNDARIES)
+def test_boundary_on_item_creation(db, stock, expected_status, expected_alerts):
+    row = inventory_service.create_item(db, item_name="Boundary Item", price=10, total_stock=stock,
+                                        status="ACTIVE")
+    assert row.status == expected_status
+    assert [a.alert_type for a in _alerts(db, row.item_id)] == expected_alerts
+    assert len(FakeSMTP.all_sent()) == len(expected_alerts)
+
+
+@pytest.mark.parametrize("stock,expected_status,expected_alerts", BOUNDARIES)
+def test_boundary_on_manual_stock_update(db, stock, expected_status, expected_alerts):
+    _add_item(db, stock=50)
+    row = inventory_service.update_item(db, "ITEM-T1", stock=stock)
+    assert row.status == expected_status
+    assert [a.alert_type for a in _alerts(db)] == expected_alerts
+    assert len(FakeSMTP.all_sent()) == len(expected_alerts)
+
+
+@pytest.mark.parametrize("stock,expected_status,expected_alerts", BOUNDARIES)
+def test_boundary_on_order_reservation(db, stock, expected_status, expected_alerts):
+    _add_item(db, stock=20)
+    _reserve(db, "ITEM-T1", 20 - stock)
+    row = db.get(models.Inventory, "ITEM-T1")
+    assert row.remaining_stock == stock
+    assert row.status == expected_status
+    assert [a.alert_type for a in _alerts(db)] == expected_alerts
+    assert len(FakeSMTP.all_sent()) == len(expected_alerts)
+
+
+def test_rule_uses_remaining_stock_not_total_stock(db):
+    # total_stock is large, remaining_stock is low -> must alert.
+    row = models.Inventory(item_id="ITEM-T9", item_name="Big Batch", price=10, total_stock=500,
+                           remaining_stock=6, used_stock=494, status="ACTIVE")
+    db.add(row)
+    db.commit()
+    _reserve(db, "ITEM-T9", 2)                                   # remaining 4
+    r = db.get(models.Inventory, "ITEM-T9")
+    assert (r.total_stock, r.remaining_stock, r.status) == (500, 4, "LOW_STOCK")
+    assert [a.alert_type for a in _alerts(db, "ITEM-T9")] == ["LOW_STOCK"]
+
+
+# --------------------------------------------------------------------------
+# Brevo HTTPS Transactional Email API (production transport, 2026-11-21).
+# urllib.request.urlopen is faked - no network call, no real email.
+# --------------------------------------------------------------------------
+import io
+import json
+import urllib.error
+
+TEST_BREVO_KEY = "xkeysib-TESTONLY-0000000000000000"   # fake key - must never appear in logs
+TEST_BREVO_SENDER = "alerts@zelqa.in"
+
+
+class FakeBrevo:
+    calls = []
+    status = 201
+    body = b'{"messageId":"<test-msg-1@smtp-relay.mailin.fr>"}'
+    error = None            # exception raised from urlopen
+
+    class _Resp:
+        def __init__(self, status, body):
+            self.status, self._body = status, body
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    @classmethod
+    def urlopen(cls, request, timeout=None):
+        cls.calls.append({"url": request.full_url, "method": request.get_method(),
+                          "headers": {k.lower(): v for k, v in request.header_items()},
+                          "json": json.loads(request.data.decode()), "timeout": timeout})
+        if cls.error:
+            raise cls.error
+        return cls._Resp(cls.status, cls.body)
+
+    @classmethod
+    def reset(cls):
+        cls.calls, cls.status, cls.error = [], 201, None
+        cls.body = b'{"messageId":"<test-msg-1@smtp-relay.mailin.fr>"}'
+
+
+@pytest.fixture()
+def brevo_env(monkeypatch):
+    FakeBrevo.reset()
+    monkeypatch.setattr(notification_service.urllib.request, "urlopen", FakeBrevo.urlopen)
+    monkeypatch.setattr(settings, "EMAIL_PROVIDER", "brevo")
+    monkeypatch.setattr(settings, "BREVO_API_KEY", TEST_BREVO_KEY + "\r ")
+    monkeypatch.setattr(settings, "BREVO_API_URL", "https://api.brevo.com/v3/smtp/email")
+    monkeypatch.setattr(settings, "EMAIL_FROM_ADDRESS", TEST_BREVO_SENDER)
+    monkeypatch.setattr(settings, "EMAIL_FROM_NAME", "OMS-360 Inventory Alerts")
+    yield FakeBrevo
+    FakeBrevo.reset()
+
+
+def _http_error(code, body=b'{"code":"unauthorized","message":"Key not found"}'):
+    return urllib.error.HTTPError("https://api.brevo.com/v3/smtp/email", code, "err", {}, io.BytesIO(body))
+
+
+def test_brevo_success_returns_sent_with_correct_request(brevo_env, captured_logs):
+    status = notification_service.send_low_stock_alert("ITEM-1002", "Millet Idly", 2, TEST_RECIPIENT,
+                                                       alert_type="LOW_STOCK", threshold=THRESHOLD)
+    assert status == "SENT"
+    assert FakeSMTP.instances == []                      # SMTP not used in brevo mode
+    call = brevo_env.calls[0]
+    assert (call["url"], call["method"]) == ("https://api.brevo.com/v3/smtp/email", "POST")
+    assert call["headers"]["api-key"] == TEST_BREVO_KEY  # trimmed
+    assert call["json"]["sender"]["email"] == TEST_BREVO_SENDER
+    assert call["json"]["to"] == [{"email": TEST_RECIPIENT}]
+    assert "Millet Idly" in call["json"]["subject"] and "2" in call["json"]["textContent"]
+    assert all(TEST_BREVO_KEY not in line for line in captured_logs)
+
+
+def test_brevo_out_of_stock_uses_out_of_stock_subject(brevo_env):
+    notification_service.send_low_stock_alert("ITEM-X", "Jowar Roti", 0, TEST_RECIPIENT,
+                                              alert_type="OUT_OF_STOCK", threshold=THRESHOLD)
+    assert "OUT OF STOCK" in brevo_env.calls[0]["json"]["subject"]
+
+
+@pytest.mark.parametrize("code", [400, 401, 403, 429, 500])
+def test_brevo_http_errors_return_failed_and_never_log_key(brevo_env, captured_logs, code):
+    brevo_env.error = _http_error(code)
+    status = notification_service.send_low_stock_alert("ITEM-1002", "Millet Idly", 2, TEST_RECIPIENT)
+    assert status == "FAILED"
+    assert any(f"HTTP {code}" in line for line in captured_logs)
+    assert all(TEST_BREVO_KEY not in line for line in captured_logs)
+
+
+def test_brevo_network_failure_returns_failed(brevo_env, captured_logs):
+    brevo_env.error = urllib.error.URLError("timed out")
+    assert notification_service.send_low_stock_alert("I", "N", 1, TEST_RECIPIENT) == "FAILED"
+    assert any("cannot reach Brevo API" in line for line in captured_logs)
+
+
+@pytest.mark.parametrize("setting", ["BREVO_API_KEY", "EMAIL_FROM_ADDRESS"])
+def test_brevo_incomplete_config_returns_failed_without_calling_api(brevo_env, monkeypatch, setting,
+                                                                     captured_logs):
+    monkeypatch.setattr(settings, setting, "")
+    assert notification_service.send_low_stock_alert("I", "N", 1, TEST_RECIPIENT) == "FAILED"
+    assert brevo_env.calls == []
+    assert any("BREVO configuration incomplete" in line for line in captured_logs)
+
+
+def test_brevo_notifications_disabled_returns_pending_without_calling_api(brevo_env, monkeypatch):
+    monkeypatch.setitem(settings.FEATURE_FLAGS, "notifications_enabled", False)
+    assert notification_service.send_low_stock_alert("I", "N", 1, TEST_RECIPIENT) == "PENDING"
+    assert brevo_env.calls == []
+
+
+def test_unknown_provider_returns_failed(monkeypatch, captured_logs):
+    monkeypatch.setattr(settings, "EMAIL_PROVIDER", "carrier-pigeon")
+    assert notification_service.send_low_stock_alert("I", "N", 1, TEST_RECIPIENT) == "FAILED"
+    assert FakeSMTP.instances == []
+
+
+def test_brevo_end_to_end_create_low_item_sends_once_and_records_sent(db, brevo_env):
+    row = inventory_service.create_item(db, item_name="Millet Idly", price=150, total_stock=2)
+    _reserve(db, row.item_id, 1, "ORD-A")                     # same episode - no second email
+    alerts = _alerts(db, row.item_id)
+    assert [(a.alert_type, a.notification_status) for a in alerts] == [("LOW_STOCK", "SENT")]
+    assert len(brevo_env.calls) == 1
+
+
+def test_brevo_failure_then_dispatch_retries_same_row_without_duplicates(db, brevo_env):
+    brevo_env.error = _http_error(401)
+    row = inventory_service.create_item(db, item_name="Millet Idly", price=150, total_stock=2)
+    assert _alerts(db, row.item_id)[0].notification_status == "FAILED"
+
+    brevo_env.error = None                                     # key fixed
+    summary = inventory_service.dispatch_open_alerts(db)
+    alerts = _alerts(db, row.item_id)
+    assert summary["sent"] == 1 and len(alerts) == 1 and alerts[0].notification_status == "SENT"
+    assert inventory_service.dispatch_open_alerts(db)["attempted"] == 0   # nothing re-sent
+    assert len(brevo_env.calls) == 2                                      # 1 failed + 1 sent

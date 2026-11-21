@@ -17,9 +17,9 @@ def get_all_inventory(db: Session = Depends(get_db)):
 
 
 @router.get("/low-stock", response_model=List[schemas.InventoryResponse],
-            summary="Items at or below the low-stock threshold",
-            description="Threshold is read from system_configuration.LOW_STOCK_THRESHOLD "
-                        "(falls back to 10 if not configured).")
+            summary="Items below the low-stock threshold (remaining_stock 1-4 by default)",
+            description="LOW_STOCK means 0 < remaining_stock < threshold. Threshold is read from "
+                        "system_configuration.LOW_STOCK_THRESHOLD (falls back to 5 if not configured).")
 def get_low_stock(db: Session = Depends(get_db)):
     return inventory_service.get_low_stock(db)
 

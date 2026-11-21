@@ -41,8 +41,11 @@ is easier to spot at a glance in an inbox - no behavior change.
     SMTP password before login.
 """
 
+import json
 import smtplib
 import socket
+import urllib.error
+import urllib.request
 from email.mime.text import MIMEText
 
 from app.config import settings
@@ -82,23 +85,39 @@ def send_low_stock_alert(item_id: str, item_name: str, remaining_stock: int, rec
                     f"at {remaining_stock} remaining left PENDING - not sent.")
         return STATUS_PENDING
 
-    missing = [name for name, value in (
-        ("OMS360_INVENTORY_ALERT_EMAIL (recipient)", recipient_email),
-        ("OMS360_EMAIL_SMTP_HOST", settings.EMAIL_SMTP_HOST),
-        ("OMS360_EMAIL_SMTP_USERNAME", settings.EMAIL_SMTP_USERNAME),
-        ("OMS360_EMAIL_SMTP_PASSWORD", settings.EMAIL_SMTP_PASSWORD),
-    ) if not (value or "").strip()]
+    provider = (settings.EMAIL_PROVIDER or "smtp").strip().lower()
+    if provider == "brevo":
+        required = (
+            ("OMS360_INVENTORY_ALERT_EMAIL (recipient)", recipient_email),
+            ("OMS360_BREVO_API_KEY", settings.BREVO_API_KEY),
+            ("OMS360_EMAIL_FROM (verified Brevo sender)", settings.EMAIL_FROM_ADDRESS),
+        )
+    elif provider == "smtp":
+        required = (
+            ("OMS360_INVENTORY_ALERT_EMAIL (recipient)", recipient_email),
+            ("OMS360_EMAIL_SMTP_HOST", settings.EMAIL_SMTP_HOST),
+            ("OMS360_EMAIL_SMTP_USERNAME", settings.EMAIL_SMTP_USERNAME),
+            ("OMS360_EMAIL_SMTP_PASSWORD", settings.EMAIL_SMTP_PASSWORD),
+        )
+    else:
+        logger.error(f"Inventory alert email NOT sent for {item_id}: unknown OMS360_EMAIL_PROVIDER "
+                     f"'{provider}' (expected 'smtp' or 'brevo').")
+        return STATUS_FAILED
+
+    missing = [name for name, value in required if not (value or "").strip()]
     if missing:
-        logger.error(f"Inventory alert email NOT sent for {item_id}: SMTP configuration incomplete "
-                     f"(missing: {', '.join(missing)}).")
+        logger.error(f"Inventory alert email NOT sent for {item_id}: {provider.upper()} configuration "
+                     f"incomplete (missing: {', '.join(missing)}).")
         return STATUS_FAILED
 
     subject, body = _build_alert_message(item_id, item_name, remaining_stock, alert_type, threshold)
-    return STATUS_SENT if _send_email(recipient_email.strip(), subject, body) else STATUS_FAILED
+    sender = _send_via_brevo if provider == "brevo" else _send_email
+    return STATUS_SENT if sender(recipient_email.strip(), subject, body) else STATUS_FAILED
 
 
 def _build_alert_message(item_id, item_name, remaining_stock, alert_type, threshold):
-    threshold_line = f"Low-stock threshold: {threshold}\n" if threshold is not None else ""
+    threshold_line = (f"Low-stock rule: alert when remaining stock is below {threshold}\n"
+                      if threshold is not None else "")
     if alert_type == "OUT_OF_STOCK":
         subject = f"⚠️ OMS-360 Inventory Alert: {item_name} is OUT OF STOCK"
         headline = f"Inventory item '{item_name}' ({item_id}) is out of stock."
@@ -167,6 +186,55 @@ def _send_email(to_address: str, subject: str, body: str) -> bool:
                      f"({type(exc).__name__}: {exc}).")
     except Exception as exc:  # never let a notification break the caller
         logger.error(f"Failed to send email to {to_address}: {type(exc).__name__}: {exc}")
+    return False
+
+
+def _send_via_brevo(to_address: str, subject: str, body: str) -> bool:
+    """Sends one email through Brevo's Transactional Email HTTPS API
+    (POST /v3/smtp/email, HTTPS port 443 - works where SMTP ports are
+    blocked). Stdlib urllib only, no new dependency. Never raises and never
+    logs the API key; Brevo error bodies are logged truncated."""
+    api_key = (settings.BREVO_API_KEY or "").strip()
+    payload = {
+        "sender": {"name": (settings.EMAIL_FROM_NAME or "OMS-360").strip(),
+                   "email": settings.EMAIL_FROM_ADDRESS.strip()},
+        "to": [{"email": to_address}],
+        "subject": subject,
+        "textContent": body,
+    }
+    request = urllib.request.Request(
+        settings.BREVO_API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"api-key": api_key, "content-type": "application/json", "accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=settings.EMAIL_SMTP_TIMEOUT_SECONDS) as resp:
+            status_code = resp.status
+            raw = resp.read().decode("utf-8", errors="replace")
+        if 200 <= status_code < 300:
+            message_id = ""
+            try:
+                message_id = json.loads(raw or "{}").get("messageId", "")
+            except ValueError:
+                pass
+            logger.info(f"Email sent via Brevo to {_mask(to_address)}: {subject} (messageId={message_id})")
+            return True
+        logger.error(f"Brevo API returned HTTP {status_code} for {_mask(to_address)}: {raw[:300]}")
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:300]
+        except Exception:
+            pass
+        hint = " - check OMS360_BREVO_API_KEY" if exc.code in (401, 403) else ""
+        logger.error(f"Failed to send email via Brevo to {_mask(to_address)}: HTTP {exc.code}{hint} "
+                     f"({detail}).")
+    except (urllib.error.URLError, socket.timeout, OSError) as exc:
+        logger.error(f"Failed to send email via Brevo to {_mask(to_address)}: cannot reach Brevo API "
+                     f"({type(exc).__name__}: {getattr(exc, 'reason', exc)}).")
+    except Exception as exc:  # never let a notification break the caller
+        logger.error(f"Failed to send email via Brevo to {_mask(to_address)}: {type(exc).__name__}: {exc}")
     return False
 
 

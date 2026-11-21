@@ -77,6 +77,18 @@ class ApplicationSettings:
     # POST /api/v1/inventory/alerts/dispatch-pending endpoint ignores the
     # cooldown.
     EMAIL_SMTP_TIMEOUT_SECONDS: float = float(os.getenv("OMS360_EMAIL_SMTP_TIMEOUT", "10"))
+
+    # 2026-11-21 addition (DEF-007): production email over HTTPS. Render's
+    # free web services block outbound SMTP ports, so production sends
+    # through Brevo's Transactional Email API instead. EMAIL_PROVIDER picks
+    # the transport: "smtp" (default - local runs keep the existing SMTP
+    # path unchanged) or "brevo". The API key is read ONLY from the
+    # environment (Render secret / local .env) - never hard-coded, never
+    # logged. EMAIL_FROM must be a sender verified in the Brevo account.
+    EMAIL_PROVIDER: str = os.getenv("OMS360_EMAIL_PROVIDER", "smtp").strip().lower()
+    BREVO_API_KEY: str = os.getenv("OMS360_BREVO_API_KEY", "")
+    BREVO_API_URL: str = os.getenv("OMS360_BREVO_API_URL", "https://api.brevo.com/v3/smtp/email")
+    EMAIL_FROM_NAME: str = os.getenv("OMS360_EMAIL_FROM_NAME", "OMS-360 Inventory Alerts")
     NOTIFICATION_RETRY_COOLDOWN_SECONDS: int = int(os.getenv("OMS360_NOTIFICATION_RETRY_COOLDOWN_SECONDS", "300"))
 
     # GPS / delivery tracking - placeholder for future live tracking (V2 roadmap)

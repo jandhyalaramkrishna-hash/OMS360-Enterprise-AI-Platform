@@ -25,7 +25,11 @@ from app.services import notification_service
 
 logger = get_logger("oms360.services.inventory_service")
 
-DEFAULT_LOW_STOCK_THRESHOLD = 10  # used if system_configuration has no override
+# 2026-11-21 business rule (DEF-007): an item is LOW_STOCK when its
+# remaining_stock is BELOW this value (1-4 with the default of 5), OUT_OF_STOCK
+# at 0, ACTIVE at 5 or more. Strictly-below, not <=. Overridable via the
+# system_configuration LOW_STOCK_THRESHOLD row (same "below" meaning).
+DEFAULT_LOW_STOCK_THRESHOLD = 5  # used if system_configuration has no override
 
 # Auto-generated Item Numbers use this pattern (e.g. ITEM-1001). Seed data
 # uses word-based ids (ITEM-BURGER, ITEM-SALAD, ...) which never match this
@@ -157,7 +161,17 @@ def create_item(db: Session, item_name: str, price: float, total_stock: int,
     moment it exists. category/unit are intentionally left NULL here -
     see InventoryCreateRequest's docstring in app/schemas.py."""
     item_id = _generate_item_id(db)
-    status_value = status or InventoryStatus.ACTIVE.value
+    # 2026-11-21 fix (DEF-007, new item created already below threshold):
+    # stock level, not the dialog's default "ACTIVE", decides the starting
+    # status. Only an explicit INACTIVE is kept as given (an admin parking
+    # the item). Everything else starts ACTIVE and is then classified by
+    # _maybe_raise_alert() below - LOW_STOCK (< threshold) or OUT_OF_STOCK
+    # (0) - which also records + queues the alert email exactly as an order
+    # reservation or manual stock correction would.
+    if status == InventoryStatus.INACTIVE.value:
+        status_value = InventoryStatus.INACTIVE.value
+    else:
+        status_value = InventoryStatus.ACTIVE.value
 
     inventory_row = models.Inventory(
         item_id=item_id, item_name=item_name, price=price,
@@ -177,9 +191,18 @@ def create_item(db: Session, item_name: str, price: float, total_stock: int,
                       total_stock, reference_order_id=None,
                       reason="Initial stock - item created via Inventory Dashboard")
 
+    if status_value != InventoryStatus.INACTIVE.value:
+        _maybe_raise_alert(db, inventory_row)   # may set LOW_STOCK/OUT_OF_STOCK + queue alert
+        item_row.status = inventory_row.status  # keep `items` mirrored
+
     db.commit()
     db.refresh(inventory_row)
-    logger.info(f"Created new inventory item {item_id} ({item_name}), starting stock={total_stock}")
+    logger.info(f"Created new inventory item {item_id} ({item_name}), starting stock={total_stock}, "
+                f"status={inventory_row.status}")
+
+    # Alert email (if the starting stock is already low/out) goes out only
+    # after the item is committed. Never raises.
+    dispatch_pending_notifications(db)
     return inventory_row
 
 
@@ -265,7 +288,7 @@ def get_low_stock(db: Session) -> List[models.Inventory]:
     threshold = _get_low_stock_threshold(db)
     return (
         db.query(models.Inventory)
-        .filter(models.Inventory.remaining_stock > 0, models.Inventory.remaining_stock <= threshold)
+        .filter(models.Inventory.remaining_stock > 0, models.Inventory.remaining_stock < threshold)
         .order_by(models.Inventory.remaining_stock.asc())
         .all()
     )
@@ -316,7 +339,7 @@ def _classify_stock_level(stock_row: models.Inventory, threshold: int):
     """(alert_type, status_value) for a depleted row, or None if above threshold."""
     if stock_row.remaining_stock <= 0:
         return "OUT_OF_STOCK", InventoryStatus.OUT_OF_STOCK.value
-    if stock_row.remaining_stock <= threshold:
+    if stock_row.remaining_stock < threshold:
         return "LOW_STOCK", InventoryStatus.LOW_STOCK.value
     return None
 
@@ -469,7 +492,7 @@ def dispatch_open_alerts(db: Session) -> dict:
     threshold = _get_low_stock_threshold(db)
     rows = (
         db.query(models.Inventory)
-        .filter(models.Inventory.remaining_stock <= threshold)
+        .filter(models.Inventory.remaining_stock < threshold)
         .order_by(models.Inventory.item_id)
         .all()
     )
@@ -486,7 +509,7 @@ def _recover_status_if_cleared(db: Session, stock_row: models.Inventory):
     """Restock/release: once stock is back above the threshold, a LOW_STOCK/
     OUT_OF_STOCK row returns to ACTIVE, so the next depletion is treated as
     a new alert episode (and emailed) instead of being de-duplicated."""
-    if stock_row.status in _ALERT_STATUSES and stock_row.remaining_stock > _get_low_stock_threshold(db):
+    if stock_row.status in _ALERT_STATUSES and stock_row.remaining_stock >= _get_low_stock_threshold(db):
         stock_row.status = InventoryStatus.ACTIVE.value
 
 
@@ -501,7 +524,7 @@ def _recompute_status_from_stock(db: Session, stock_row: models.Inventory):
     threshold = _get_low_stock_threshold(db)
     if stock_row.remaining_stock <= 0:
         _maybe_raise_alert(db, stock_row)
-    elif stock_row.remaining_stock <= threshold:
+    elif stock_row.remaining_stock < threshold:
         _maybe_raise_alert(db, stock_row)
     else:
         stock_row.status = InventoryStatus.ACTIVE.value
