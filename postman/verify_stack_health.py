@@ -116,7 +116,6 @@ def main():
     print("=" * 79)
 
     docker_ok, docker_msg = check_docker_containers()
-    print(f"  [{'OK' if docker_ok else 'FAIL'}] Docker containers : {docker_msg}")
 
     body, fastapi_ok, err = None, False, None
     for attempt in range(args.retries + 1):
@@ -143,6 +142,13 @@ def main():
     else:
         print("  [FAIL] Kafka broker      : could not check - FastAPI unreachable")
         print("  [FAIL] MySQL             : could not check - FastAPI unreachable")
+
+    # Native (no-Docker) run: the app itself reports docker=NOT_CONTAINERIZED,
+    # so a missing `docker compose` stack is expected, not a failure.
+    if (not docker_ok and fastapi_ok and body
+            and str(body.get("dependencies", {}).get("docker", "")).upper() == "NOT_CONTAINERIZED"):
+        docker_ok, docker_msg = True, "not used - app reports NOT_CONTAINERIZED (native run)"
+    print(f"  [{'OK' if docker_ok else 'FAIL'}] Docker containers : {docker_msg}")
 
     all_ok = docker_ok and fastapi_ok and kafka_ok and mysql_ok
     print("=" * 79)
