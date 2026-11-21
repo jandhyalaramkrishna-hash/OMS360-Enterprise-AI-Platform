@@ -78,8 +78,13 @@ def notify_low_stock(item_id: str, item_name: str, remaining_stock: int, recipie
 
 
 def send_low_stock_alert(item_id: str, item_name: str, remaining_stock: int, recipient_email: str,
-                         alert_type: str = "LOW_STOCK", threshold: int = None) -> str:
-    """Sends one inventory alert email. Never raises. Returns PENDING/SENT/FAILED."""
+                         alert_type: str = "LOW_STOCK", threshold: int = None,
+                         low_stock_items=None) -> str:
+    """Sends one inventory alert email. Never raises. Returns PENDING/SENT/FAILED.
+
+    low_stock_items (optional): every item currently below the threshold, as
+    (item_id, item_name, remaining_stock) tuples - listed in the email body
+    so one alert shows the whole low-stock picture (2026-11-21)."""
     if not settings.FEATURE_FLAGS.get("notifications_enabled", False):
         logger.info(f"[notifications disabled] {alert_type} alert for {item_name} ({item_id}) "
                     f"at {remaining_stock} remaining left PENDING - not sent.")
@@ -110,12 +115,13 @@ def send_low_stock_alert(item_id: str, item_name: str, remaining_stock: int, rec
                      f"incomplete (missing: {', '.join(missing)}).")
         return STATUS_FAILED
 
-    subject, body = _build_alert_message(item_id, item_name, remaining_stock, alert_type, threshold)
+    subject, body = _build_alert_message(item_id, item_name, remaining_stock, alert_type, threshold,
+                                         low_stock_items)
     sender = _send_via_brevo if provider == "brevo" else _send_email
     return STATUS_SENT if sender(recipient_email.strip(), subject, body) else STATUS_FAILED
 
 
-def _build_alert_message(item_id, item_name, remaining_stock, alert_type, threshold):
+def _build_alert_message(item_id, item_name, remaining_stock, alert_type, threshold, low_stock_items=None):
     threshold_line = (f"Low-stock rule: alert when remaining stock is below {threshold}\n"
                       if threshold is not None else "")
     if alert_type == "OUT_OF_STOCK":
@@ -128,8 +134,21 @@ def _build_alert_message(item_id, item_name, remaining_stock, alert_type, thresh
             f"Alert type: {alert_type}\n"
             f"Remaining stock: {remaining_stock}\n"
             f"{threshold_line}\n"
+            f"{_build_low_stock_list(low_stock_items, threshold)}"
             f"This is an automated alert from OMS-360 Inventory Monitoring.")
     return subject, body
+
+
+def _build_low_stock_list(low_stock_items, threshold) -> str:
+    """'All items currently below N' section; empty string when no list given."""
+    if not low_stock_items:
+        return ""
+    limit = f"below {threshold}" if threshold is not None else "below the low-stock threshold"
+    lines = [f"All items currently {limit} ({len(low_stock_items)}):"]
+    for list_item_id, list_item_name, list_remaining in low_stock_items:
+        level = "OUT OF STOCK" if list_remaining <= 0 else "LOW STOCK"
+        lines.append(f"  - {list_item_name} ({list_item_id}): {list_remaining} remaining - {level}")
+    return "\n".join(lines) + "\n\n"
 
 
 def _mask(address: str) -> str:

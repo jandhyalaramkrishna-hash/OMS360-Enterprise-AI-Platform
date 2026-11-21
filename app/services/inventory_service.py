@@ -436,9 +436,13 @@ def _deliver_alert(db: Session, alert_row: models.InventoryAlert, respect_cooldo
     # Deliver to the currently configured recipient; record it on the row
     # so inventory_alerts.recipient_email shows where the email really went.
     recipient = (settings.INVENTORY_ALERT_EMAIL or alert_row.recipient_email or "").strip()
+    threshold = alert_row.threshold_value
+    if threshold is None:
+        threshold = _get_low_stock_threshold(db)
     status = notification_service.send_low_stock_alert(
         alert_row.item_id, alert_row.item_name, alert_row.remaining_stock, recipient,
-        alert_type=alert_row.alert_type or "LOW_STOCK", threshold=alert_row.threshold_value,
+        alert_type=alert_row.alert_type or "LOW_STOCK", threshold=threshold,
+        low_stock_items=_current_low_stock_items(db, threshold),
     )
     with _last_failed_attempt_lock:
         if status == notification_service.STATUS_FAILED:
@@ -451,6 +455,26 @@ def _deliver_alert(db: Session, alert_row: models.InventoryAlert, respect_cooldo
         alert_row.recipient_email = recipient
     db.commit()
     return status
+
+
+def _current_low_stock_items(db: Session, threshold: int) -> Optional[list]:
+    """2026-11-21: every item currently below the threshold (out-of-stock
+    included, INACTIVE items excluded), lowest stock first, as
+    (item_id, item_name, remaining_stock) - listed in each alert email.
+    Read-only. Never raises: on any error returns None and the email is
+    still sent without the list."""
+    try:
+        rows = (
+            db.query(models.Inventory)
+            .filter(models.Inventory.remaining_stock < threshold,
+                    models.Inventory.status != InventoryStatus.INACTIVE.value)
+            .order_by(models.Inventory.remaining_stock.asc(), models.Inventory.item_id.asc())
+            .all()
+        )
+        return [(r.item_id, r.item_name, r.remaining_stock) for r in rows]
+    except Exception:
+        logger.exception("Could not build the low-stock item list for the alert email")
+        return None
 
 
 def dispatch_pending_notifications(db: Session, respect_cooldown: bool = True) -> dict:

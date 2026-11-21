@@ -761,3 +761,86 @@ def test_brevo_failure_then_dispatch_retries_same_row_without_duplicates(db, bre
     assert summary["sent"] == 1 and len(alerts) == 1 and alerts[0].notification_status == "SENT"
     assert inventory_service.dispatch_open_alerts(db)["attempted"] == 0   # nothing re-sent
     assert len(brevo_env.calls) == 2                                      # 1 failed + 1 sent
+
+
+# --------------------------------------------------------------------------
+# 2026-11-21: every alert email lists ALL items currently below 5
+# (trigger unchanged - one email per new low/out-of-stock episode)
+# --------------------------------------------------------------------------
+import email as _email
+
+
+def _smtp_body(index=0):
+    raw = FakeSMTP.all_sent()[index][2]
+    return _email.message_from_string(raw).get_payload(decode=True).decode("utf-8")
+
+
+def test_alert_email_lists_every_item_below_five_lowest_first(db):
+    _add_item(db, "ITEM-A", stock=3, status="LOW_STOCK", name="Millet Idly")
+    _add_item(db, "ITEM-B", stock=0, status="OUT_OF_STOCK", name="Jowar Roti")
+    _add_item(db, "ITEM-C", stock=5, name="Ragi Malt")                 # exactly 5 - not low
+    _add_item(db, "ITEM-D", stock=40, name="Millet Dosa")              # healthy
+    _add_item(db, "ITEM-E", stock=1, status="INACTIVE", name="Seasonal Item")  # inactive - excluded
+
+    row = inventory_service.create_item(db, item_name="Veg Idly", price=90, total_stock=2)
+
+    assert len(FakeSMTP.all_sent()) == 1                    # still exactly one email
+    body = _smtp_body()
+    assert "All items currently below 5 (3):" in body
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip().startswith("- ")]
+    assert lines == [
+        "- Jowar Roti (ITEM-B): 0 remaining - OUT OF STOCK",
+        f"- Veg Idly ({row.item_id}): 2 remaining - LOW STOCK",
+        "- Millet Idly (ITEM-A): 3 remaining - LOW STOCK",
+    ]
+    assert "Ragi Malt" not in body and "Millet Dosa" not in body and "Seasonal Item" not in body
+
+
+def test_list_does_not_create_alerts_or_emails_for_other_low_items(db):
+    _add_item(db, "ITEM-A", stock=3, status="LOW_STOCK", name="Millet Idly")   # no alert row
+    inventory_service.create_item(db, item_name="Veg Idly", price=90, total_stock=2)
+    assert len(FakeSMTP.all_sent()) == 1
+    assert _alerts(db, "ITEM-A") == []                     # listed, but no alert row created
+    assert db.get(models.Inventory, "ITEM-A").remaining_stock == 3   # inventory untouched
+
+
+def test_already_low_item_update_still_sends_no_duplicate_email(db):
+    inventory_service.create_item(db, item_name="Veg Idly", price=90, total_stock=2)
+    _add_item(db, "ITEM-A", stock=3, status="LOW_STOCK", name="Millet Idly")
+    vi = db.query(models.Inventory).filter(models.Inventory.item_name == "Veg Idly").one()
+    _reserve(db, vi.item_id, 1, "ORD-X")                    # same LOW_STOCK episode
+    assert len(FakeSMTP.all_sent()) == 1
+
+
+def test_brevo_email_body_contains_the_full_list(db, brevo_env):
+    _add_item(db, "ITEM-A", stock=3, status="LOW_STOCK", name="Millet Idly")
+    inventory_service.create_item(db, item_name="Veg Idly", price=90, total_stock=2)
+    assert len(brevo_env.calls) == 1
+    text = brevo_env.calls[0]["json"]["textContent"]
+    assert "All items currently below 5 (2):" in text
+    assert "Millet Idly (ITEM-A): 3 remaining - LOW STOCK" in text
+    assert "Veg Idly" in text
+
+
+def test_message_without_list_is_unchanged():
+    _, body_without = notification_service._build_alert_message("ITEM-T1", "Paneer Tikka", 4,
+                                                                "LOW_STOCK", THRESHOLD)
+    _, body_empty = notification_service._build_alert_message("ITEM-T1", "Paneer Tikka", 4,
+                                                              "LOW_STOCK", THRESHOLD, [])
+    assert "All items currently" not in body_without
+    assert body_without == body_empty
+
+
+def test_list_unavailable_still_sends_the_alert_email(db, monkeypatch):
+    monkeypatch.setattr(inventory_service, "_current_low_stock_items",
+                        lambda _db, _t: None)            # helper's own failure contract
+    inventory_service.create_item(db, item_name="Veg Idly", price=90, total_stock=2)
+    assert len(FakeSMTP.all_sent()) == 1
+    assert "All items currently" not in _smtp_body()
+
+
+def test_list_helper_returns_none_on_query_error(db, monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("db hiccup")
+    monkeypatch.setattr(db, "query", _boom)
+    assert inventory_service._current_low_stock_items(db, THRESHOLD) is None
