@@ -16,6 +16,11 @@ from sqlalchemy.engine import URL
 # real env vars (set via `docker run -e` / compose `environment:` /
 # your CI secrets) take precedence automatically - load_dotenv() does NOT
 # override already-set environment variables by default.
+# TEMPORARY (DB diagnostic, 2026-11-22): names of variables that came from
+# the real process environment, recorded BEFORE .env is loaded, so the
+# diagnostic can report each value's source. Names only - never values.
+PRE_DOTENV_ENV_KEYS = frozenset(os.environ)
+
 load_dotenv()
 
 
