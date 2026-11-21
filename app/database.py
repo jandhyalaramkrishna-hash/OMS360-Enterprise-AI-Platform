@@ -16,10 +16,21 @@ automatically - something has to call it on purpose (see scripts below).
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+import os
+
 from app.config import settings
+
+# Optional TLS for managed cloud MySQL (e.g. TiDB Cloud, which requires it).
+# Off by default, so local MySQL/Docker behaviour is unchanged. Enable with
+# OMS360_DB_SSL=true; certificates are verified against the certifi CA bundle.
+_connect_args = {}
+if os.getenv("OMS360_DB_SSL", "false").lower() == "true":
+    import certifi
+    _connect_args = {"ssl": {"ca": certifi.where()}}
 
 engine = create_engine(
     settings.DATABASE_URL,
+    connect_args=_connect_args,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_recycle=3600,
