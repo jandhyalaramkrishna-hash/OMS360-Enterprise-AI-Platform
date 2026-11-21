@@ -10,12 +10,19 @@ names. Every other module (database.py, messaging/*, routes/*) reads from
 import os
 
 from dotenv import load_dotenv
+from sqlalchemy.engine import URL
 
 # Loads a .env file from the project root if present. In Docker/production,
 # real env vars (set via `docker run -e` / compose `environment:` /
 # your CI secrets) take precedence automatically - load_dotenv() does NOT
 # override already-set environment variables by default.
 load_dotenv()
+
+
+def _env(name: str, default: str) -> str:
+    """Environment value with accidental surrounding whitespace removed
+    (e.g. a trailing space or CR/LF pasted into a hosting dashboard)."""
+    return os.getenv(name, default).strip()
 
 
 class ApplicationSettings:
@@ -103,19 +110,30 @@ class ApplicationSettings:
     AI_API_KEY: str = os.getenv("OMS360_AI_API_KEY", "")
 
     # Relational Database Constraints
-    DB_HOST: str = os.getenv("OMS360_DB_HOST", "127.0.0.1")       # Use 127.0.0.1 to force local TCP routing
-    DB_PORT: int = int(os.getenv("OMS360_DB_PORT", "3306"))
-    DB_USER: str = os.getenv("OMS360_DB_USER", "root")
-    DB_PASSWORD: str = os.getenv("OMS360_DB_PASSWORD", "root123") # Change "password" to "root123"
-    DB_NAME: str = os.getenv("OMS360_DB_NAME", "oms360_db")
+    # 2026-11-22 (production 1045 "Access denied" fix): every DB value is
+    # trimmed of accidental surrounding whitespace, and DATABASE_URL below is
+    # built with SQLAlchemy's URL.create() so the password is passed through
+    # exactly - characters such as % @ # : / ? and spaces are no longer
+    # re-interpreted by URL parsing.
+    DB_HOST: str = _env("OMS360_DB_HOST", "127.0.0.1")       # Use 127.0.0.1 to force local TCP routing
+    DB_PORT: int = int(_env("OMS360_DB_PORT", "3306"))
+    DB_USER: str = _env("OMS360_DB_USER", "root")
+    DB_PASSWORD: str = _env("OMS360_DB_PASSWORD", "root123") # Change "password" to "root123"
+    DB_NAME: str = _env("OMS360_DB_NAME", "oms360_db")
     DB_POOL_SIZE: int = int(os.getenv("OMS360_DB_POOL_SIZE", "10"))
     DB_MAX_OVERFLOW: int = int(os.getenv("OMS360_DB_MAX_OVERFLOW", "20"))
 
     @property
-    def DATABASE_URL(self) -> str:
-        return (
-            f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}"
-            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+    def DATABASE_URL(self) -> URL:
+        """SQLAlchemy URL object (accepted directly by create_engine()).
+        Its str() masks the password as ***, so it is safe to log."""
+        return URL.create(
+            drivername="mysql+pymysql",
+            username=self.DB_USER,
+            password=self.DB_PASSWORD,
+            host=self.DB_HOST,
+            port=self.DB_PORT,
+            database=self.DB_NAME,
         )
 
     # Kafka

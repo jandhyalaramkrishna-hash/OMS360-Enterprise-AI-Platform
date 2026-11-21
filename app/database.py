@@ -23,10 +23,16 @@ from app.config import settings
 # Optional TLS for managed cloud MySQL (e.g. TiDB Cloud, which requires it).
 # Off by default, so local MySQL/Docker behaviour is unchanged. Enable with
 # OMS360_DB_SSL=true; certificates are verified against the certifi CA bundle.
-_connect_args = {}
-if os.getenv("OMS360_DB_SSL", "false").lower() == "true":
-    import certifi
-    _connect_args = {"ssl": {"ca": certifi.where()}}
+# 2026-11-22: the flag is trimmed, so "true " pasted with a trailing space
+# still enables TLS instead of silently connecting without it.
+def build_connect_args() -> dict:
+    if os.getenv("OMS360_DB_SSL", "false").strip().lower() == "true":
+        import certifi
+        return {"ssl": {"ca": certifi.where()}}
+    return {}
+
+
+_connect_args = build_connect_args()
 
 engine = create_engine(
     settings.DATABASE_URL,

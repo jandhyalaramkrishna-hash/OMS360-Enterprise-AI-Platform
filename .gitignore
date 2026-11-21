@@ -36,3 +36,9 @@ Student_Practice_Kit/*.exe
 student-practice-kit-src/build/
 
 sql start command.txt
+
+# Local production-administration tools (may contain TiDB credentials) - never commit
+TIDB.bat
+TIDB.ps1
+**/TIDB.bat
+**/TIDB.ps1
