@@ -1,0 +1,66 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "",
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/dashboard/operations",
+      "permanent": false
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/dashboard/operations",
+      "permanent": false
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/dashboard/operations",
+      "destination": "/operations_dashboard.html"
+    },
+    {
+      "source": "/dashboard/monitoring",
+      "destination": "/monitoring_dashboard.html"
+    },
+    {
+      "source": "/dashboard/inventory",
+      "destination": "/inventory_dashboard.html"
+    },
+    {
+      "source": "/dashboard/ai-copilot",
+      "destination": "/ai_copilot.html"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://oms360-api.onrender.com/api/:path*"
+    },
+    {
+      "source": "/health",
+      "destination": "https://oms360-api.onrender.com/health"
+    },
+    {
+      "source": "/version",
+      "destination": "https://oms360-api.onrender.com/version"
+    },
+    {
+      "source": "/docs",
+      "destination": "https://oms360-api.onrender.com/docs"
+    },
+    {
+      "source": "/openapi.json",
+      "destination": "https://oms360-api.onrender.com/openapi.json"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/dashboard/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate"
+        }
+      ]
+    }
+  ]
+}
