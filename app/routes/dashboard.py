@@ -42,7 +42,7 @@ import hashlib
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app import models, schemas
@@ -51,7 +51,7 @@ from app.core.enums import KitchenStatus, DeliveryStatus, OrderStatus, PaymentSt
 from app.core.kafka_admin import get_topic_stats, get_dlq_summary
 from app.core import metrics as metrics_module
 from app.database import get_db, get_pool_stats
-from app.services import kitchen_service, delivery_service
+from app.services import kitchen_service, delivery_service, inventory_service
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["Dashboard"])
 
@@ -302,11 +302,31 @@ def _payment_failures(db: Session, limit: int = 20) -> dict:
     }
 
 
+def _stock_level_query(db: Session, status: str):
+    """2026-11-21 (dashboard consistency fix): LOW_STOCK / OUT_OF_STOCK are
+    derived from remaining_stock with the same threshold the low-stock API
+    and alert email use (inventory_service._get_low_stock_threshold, default
+    5) - not from the stored inventory.status column, which can be stale
+    (e.g. demo-seeded rows or items created before the rule changed).
+        remaining_stock <= 0              -> OUT_OF_STOCK
+        0 < remaining_stock < threshold   -> LOW_STOCK
+        remaining_stock >= threshold      -> ACTIVE (not listed)
+    INACTIVE items are excluded, matching the alert email list. Read-only."""
+    threshold = inventory_service._get_low_stock_threshold(db)
+    query = db.query(models.Inventory).filter(
+        or_(models.Inventory.status.is_(None), models.Inventory.status != "INACTIVE"))
+    if status == "OUT_OF_STOCK":
+        return query.filter(models.Inventory.remaining_stock <= 0)
+    if status == "LOW_STOCK":
+        return query.filter(models.Inventory.remaining_stock > 0,
+                            models.Inventory.remaining_stock < threshold)
+    raise ValueError(f"unsupported stock level: {status}")
+
+
 def _inventory_by_status(db: Session, status: str, limit: int = 20) -> list[dict]:
     rows = (
-        db.query(models.Inventory)
-        .filter(models.Inventory.status == status)
-        .order_by(models.Inventory.remaining_stock.asc())
+        _stock_level_query(db, status)
+        .order_by(models.Inventory.remaining_stock.asc(), models.Inventory.item_id.asc())
         .limit(limit)
         .all()
     )
@@ -677,14 +697,8 @@ def monitoring_snapshot(db: Session = Depends(get_db)):
     active_alerts = [a for a in all_alerts if a["is_active"]]
 
     total_items = db.query(func.count(models.Inventory.item_id)).scalar() or 0
-    low_stock_count = (
-        db.query(func.count(models.Inventory.item_id))
-        .filter(models.Inventory.status == "LOW_STOCK").scalar() or 0
-    )
-    out_of_stock_count = (
-        db.query(func.count(models.Inventory.item_id))
-        .filter(models.Inventory.status == "OUT_OF_STOCK").scalar() or 0
-    )
+    low_stock_count = _stock_level_query(db, "LOW_STOCK").count()
+    out_of_stock_count = _stock_level_query(db, "OUT_OF_STOCK").count()
     stock_value = (
         db.query(func.coalesce(func.sum(models.Inventory.remaining_stock * models.Inventory.price), 0.0))
         .scalar() or 0.0

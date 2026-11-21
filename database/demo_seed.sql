@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Populates the DB with a known, demo-ready dataset: a few inventory items
 -- and one order per business scenario (normal in-flight order, delivered
--- order, failed-payment order, cancelled order, low-stock item, an
+-- order, failed-payment order, cancelled order, an
 -- out-of-stock item, one duplicate-order record, and one DLQ record) so
 -- every dashboard card/table has something real to show without waiting
 -- for live traffic.
@@ -32,7 +32,7 @@
 INSERT INTO inventory (item_id, item_name, price, total_stock, remaining_stock, used_stock, status) VALUES
   ('ITEM-BURGER',  'Classic Beef Burger',   249.00, 200, 178, 22,  'ACTIVE'),
   ('ITEM-PIZZA',   'Margherita Pizza',      399.00, 150, 140, 10,  'ACTIVE'),
-  ('ITEM-FRIES',   'Salted Fries',           99.00, 300,  12, 288, 'LOW_STOCK'),
+  ('ITEM-FRIES',   'Salted Fries',           99.00, 300,  12, 288, 'ACTIVE'),
   ('ITEM-COLA',    'Cola 500ml',             59.00, 400, 240, 160, 'ACTIVE'),
   ('ITEM-SALAD',   'Caesar Salad',          179.00, 100,   0, 100, 'OUT_OF_STOCK'),
   ('ITEM-COFFEE',  'Cold Brew Coffee',      149.00, 120,  95,  25, 'ACTIVE');
@@ -40,7 +40,7 @@ INSERT INTO inventory (item_id, item_name, price, total_stock, remaining_stock, 
 INSERT INTO items (item_id, item_name, price, total_stock, remaining_stock, used_stock, status) VALUES
   ('ITEM-BURGER',  'Classic Beef Burger',   249.00, 200, 178, 22,  'ACTIVE'),
   ('ITEM-PIZZA',   'Margherita Pizza',      399.00, 150, 140, 10,  'ACTIVE'),
-  ('ITEM-FRIES',   'Salted Fries',           99.00, 300,  12, 288, 'LOW_STOCK'),
+  ('ITEM-FRIES',   'Salted Fries',           99.00, 300,  12, 288, 'ACTIVE'),
   ('ITEM-COLA',    'Cola 500ml',             59.00, 400, 240, 160, 'ACTIVE'),
   ('ITEM-SALAD',   'Caesar Salad',          179.00, 100,   0, 100, 'OUT_OF_STOCK'),
   ('ITEM-COFFEE',  'Cold Brew Coffee',      149.00, 120,  95,  25, 'ACTIVE');
@@ -199,16 +199,11 @@ INSERT INTO dlq_orders (order_id, transaction_id, payload, moved_at) VALUES
    '{"order_id":"DEMO-ORD-999","reason":"kafka consumer retry limit exceeded (demo data)"}',
    DATE_SUB(NOW(), INTERVAL 1 HOUR));
 
--- ---------------------------------------------------------------------------
--- 5. Inventory alert (for the low-stock card — matches ITEM-FRIES above)
--- ---------------------------------------------------------------------------
-INSERT INTO inventory_alerts (item_id, item_name, remaining_stock, threshold_value, alert_type, notification_type, notification_status, recipient_email, created_at) VALUES
-  ('ITEM-FRIES', 'Salted Fries', 12, 20, 'LOW_STOCK', 'EMAIL', 'SENT', 'ops@oms360.demo', DATE_SUB(NOW(), INTERVAL 30 MINUTE));
-
 -- ============================================================================
 -- Done. 6 orders (1 delivered, 1 preparing, 1 out-for-delivery, 1 failed,
--- 1 cancelled, 1 pending-payment), 1 duplicate marker, 1 DLQ entry, 1 low
--- stock item, 1 out-of-stock item, 1 inventory alert.
+-- 1 cancelled, 1 pending-payment), 1 duplicate marker, 1 DLQ entry and
+-- 1 out-of-stock item. (No seeded low-stock item or inventory alert: alerts
+-- are created by the app when stock drops below 5 - see DEF-007.)
 -- All payment_status/order_status pairs above are valid per the workflow
 -- enforced in app/routes/dashboard.py's _check_state_validity().
 -- ============================================================================

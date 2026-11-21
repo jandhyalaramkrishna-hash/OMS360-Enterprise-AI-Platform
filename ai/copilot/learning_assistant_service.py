@@ -84,7 +84,7 @@ _TOPICS = {
             "remaining_stock, increments used_stock, writes an inventory_ledger row for the "
             "movement, and raises InventoryLockException if requested quantity exceeds what's "
             "available. The low-stock threshold is read from system_configuration "
-            "(LOW_STOCK_THRESHOLD), falling back to a default of 10 if unset, and crossing into "
+            "(LOW_STOCK_THRESHOLD), falling back to a default of 5 if unset, and crossing into "
             "LOW_STOCK or OUT_OF_STOCK raises a row in inventory_alerts."
         ),
         ("inventory", "stock", "low stock", "out of stock", "ledger"),
