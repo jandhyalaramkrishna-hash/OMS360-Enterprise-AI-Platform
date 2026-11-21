@@ -66,11 +66,6 @@ from app.api.ai.copilot_router import router as ai_copilot_router
 
 configure_logging()
 
-# TEMPORARY (2026-11-22): one-line, secret-free database configuration
-# diagnostic for the production 1045 investigation - see app/core/db_diagnostics.py.
-from app.core.db_diagnostics import log_db_diagnostic  # noqa: E402
-log_db_diagnostic()
-
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
